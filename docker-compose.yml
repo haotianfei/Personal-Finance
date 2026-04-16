@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      # 使用命名卷持久化数据，避免重建时丢失
+      - ./data:/app/data
+      # 代码挂载（开发模式）
+      - ./backend:/app
+      # 排除缓存目录
+      - /app/routers/__pycache__
+      - /app/services/__pycache__
+      - /app/__pycache__
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_PATH=/app/data/person_fin.db
+    restart: unless-stopped
+    networks:
+      - default
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:8000
+      - NODE_ENV=production
+    depends_on:
+      - backend
+    restart: unless-stopped
+    # 确保前端容器可以访问后端服务
+    networks:
+      - default
+
+volumes:
+  person_fin_data:
+
+networks:
+  default:
+    name: person_fin_network
