@@ -4,7 +4,7 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, distinct, delete
 
-from models import AssetRecord, FundType, Account, LiquidityRating
+from models import AssetRecord, FundType, Account, LiquidityRating, AssetOwner
 from schemas import AssetRecordCreate, AssetRecordOut, AssetRecordTemplate
 from services.period_service import get_period_start_end, get_previous_period_end
 
@@ -16,6 +16,7 @@ def list_records(
     date_to: date | None = None,
     fund_type_id: int | None = None,
     account_id: int | None = None,
+    owner_id: int | None = None,
     asset_name: str | None = None,
     period_type: str | None = None,
     year: int | None = None,
@@ -61,6 +62,8 @@ def list_records(
         q = q.where(AssetRecord.fund_type_id == fund_type_id)
     if account_id:
         q = q.where(AssetRecord.account_id == account_id)
+    if owner_id:
+        q = q.where(AssetRecord.owner_id == owner_id)
     if asset_name:
         q = q.where(AssetRecord.asset_name.contains(asset_name))
 
@@ -85,6 +88,7 @@ def create_record(db: Session, data: AssetRecordCreate) -> AssetRecord:
         fund_type_id=data.fund_type_id,
         asset_name=data.asset_name,
         account_id=data.account_id,
+        owner_id=data.owner_id,
         amount=data.amount,
     )
     db.add(record)
@@ -102,6 +106,7 @@ def batch_create_records(db: Session, records_data: list[AssetRecordCreate]) -> 
             fund_type_id=data.fund_type_id,
             asset_name=data.asset_name,
             account_id=data.account_id,
+            owner_id=data.owner_id,
             amount=data.amount,
         )
         db.add(record)
@@ -202,6 +207,8 @@ def record_to_out(record: AssetRecord) -> AssetRecordOut:
         asset_name=record.asset_name,
         account_id=record.account_id,
         account_name=record.account.name if record.account else None,
+        owner_id=record.owner_id,
+        owner_name=record.owner.name if record.owner else None,
         amount=record.amount,
         import_batch_id=record.import_batch_id,
         created_at=record.created_at,
@@ -406,6 +413,7 @@ def batch_create_by_period(
                 existing.liquidity_rating_id = record_template.liquidity_rating_id
                 existing.fund_type_id = record_template.fund_type_id
                 existing.account_id = record_template.account_id
+                existing.owner_id = record_template.owner_id
                 existing.amount = record_template.amount
                 existing.updated_at = datetime.now()
                 db.commit()
@@ -415,7 +423,7 @@ def batch_create_by_period(
                 # 跳过
                 skipped_periods.append(period)
             continue
-        
+
         # 创建记录
         record_data = AssetRecordCreate(
             asset_date=last_date,
@@ -423,6 +431,7 @@ def batch_create_by_period(
             fund_type_id=record_template.fund_type_id,
             asset_name=record_template.asset_name,
             account_id=record_template.account_id,
+            owner_id=record_template.owner_id,
             amount=record_template.amount,
         )
         

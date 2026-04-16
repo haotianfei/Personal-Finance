@@ -3,9 +3,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
-from routers import assets, analysis, imports, dimensions, management, exports, proportion, liquidity_ratings, alerts, allocations, export_history
+from routers import assets, analysis, imports, dimensions, management, exports, proportion, liquidity_ratings, alerts, allocations, export_history, asset_owners
 from services.scheduler_service import init_scheduler, shutdown_scheduler
 from services.auto_export_service import load_auto_export_rules
+from services.db_migration_service import migrate_database
 
 
 @asynccontextmanager
@@ -14,8 +15,17 @@ async def lifespan(app: FastAPI):
     data_dir = os.path.join(os.path.dirname(__file__), "data")
     os.makedirs(data_dir, exist_ok=True)
     
-    # 创建数据库表
+    # 创建数据库表（新表）
     Base.metadata.create_all(bind=engine)
+    
+    # 执行数据库迁移（更新现有表结构）
+    try:
+        migrate_database()
+        print("Database migration completed successfully")
+    except Exception as e:
+        print(f"Database migration failed: {e}")
+        import traceback
+        traceback.print_exc()
     
     # 初始化调度器
     init_scheduler()
@@ -54,6 +64,7 @@ app.include_router(liquidity_ratings.router, prefix="/api/liquidity-ratings", ta
 app.include_router(alerts.router, prefix="/api/alerts", tags=["预警"])
 app.include_router(allocations.router, prefix="/api/allocation", tags=["资产配置"])
 app.include_router(export_history.router, prefix="/api/export-history", tags=["导出历史"])
+app.include_router(asset_owners.router, prefix="/api/asset-owners", tags=["资产所有者"])
 
 
 @app.get("/api/health")

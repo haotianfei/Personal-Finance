@@ -1,15 +1,20 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { formatAmount, formatDate, PERIOD_OPTIONS } from '@/lib/utils'
-import type { AssetRecord, AssetRecordCreate, FundType, Account, BatchUpdateAssets, AssetHistoryByNameResponse, BatchCreateByPeriodResult, LiquidityRating } from '@/types'
+import type { AssetRecord, AssetRecordCreate, FundType, Account, BatchUpdateAssets, AssetHistoryByNameResponse, BatchCreateByPeriodResult, LiquidityRating, AssetOwner } from '@/types'
 import {
-  Plus, Copy, Trash2, Pencil, X, Check, ChevronLeft, ChevronRight, Search, Edit3, ChevronDown, Square, CheckSquare, AlertTriangle, History, CalendarPlus
+  Plus, Copy, Trash2, Pencil, X, Check, Search, Edit3, AlertTriangle, History, CalendarPlus, ChevronDown
 } from 'lucide-react'
-import { DatePicker } from 'antd'
-import dayjs from 'dayjs'
+import { Button, Space, Tag, Popconfirm, message, Table, Input } from 'antd'
+import type { ColumnsType, TableProps } from 'antd/es/table'
+
+// 动态导入 ProComponents，避免 SSR 问题
+import type { ProColumns, ActionType } from '@ant-design/pro-components'
+const ProTable = dynamic(() => import('@ant-design/pro-components').then(mod => mod.ProTable), { ssr: false })
+import dynamic from 'next/dynamic'
 
 // --- Reusable Modal ---
 function Modal({ open, onClose, title, children, size = 'md' }: {
@@ -151,14 +156,12 @@ function BatchUpdateHistoryModal({
   assetName: string
   fundTypes: FundType[]
   accounts: Account[]
-  liquidityRatings: import('@/types').LiquidityRating[]
+  liquidityRatings: LiquidityRating[]
   onSubmit: (data: BatchUpdateAssets, summary: { count: number; changes: string[] }) => void
 }) {
-  const queryClient = useQueryClient()
   const [historyData, setHistoryData] = useState<AssetHistoryByNameResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
 
-  // Field selection states
   const [selectedFields, setSelectedFields] = useState<{
     asset_name: boolean
     fund_type_id: boolean
@@ -171,7 +174,6 @@ function BatchUpdateHistoryModal({
     liquidity_rating_id: false
   })
 
-  // Field values
   const [fieldValues, setFieldValues] = useState<{
     asset_name: string
     fund_type_id: string
@@ -184,21 +186,18 @@ function BatchUpdateHistoryModal({
     liquidity_rating_id: ''
   })
 
-  // Load history data when modal opens
   useEffect(() => {
     if (open && assetName) {
       setIsLoading(true)
       api.getAssetHistoryByName(assetName)
         .then(data => {
           setHistoryData(data)
-          // Pre-fill asset name
           setFieldValues(prev => ({ ...prev, asset_name: assetName }))
         })
         .finally(() => setIsLoading(false))
     }
   }, [open, assetName])
 
-  // Reset state when modal closes
   useEffect(() => {
     if (!open) {
       setHistoryData(null)
@@ -276,7 +275,6 @@ function BatchUpdateHistoryModal({
           <div className="text-center py-8 text-slate-500">加载中...</div>
         ) : historyData ? (
           <>
-            {/* Impact Info */}
             <div className="bg-brand-50 border border-brand-200 rounded-lg p-4">
               <div className="flex items-center gap-2 text-brand-800">
                 <History size={20} />
@@ -287,7 +285,6 @@ function BatchUpdateHistoryModal({
               </p>
             </div>
 
-            {/* Sample Records */}
             {historyData.sample_records.length > 0 && (
               <div>
                 <h4 className="text-sm font-medium text-slate-700 mb-3">示例记录</h4>
@@ -318,11 +315,9 @@ function BatchUpdateHistoryModal({
               </div>
             )}
 
-            {/* Field Selection */}
             <div className="border-t border-slate-100 pt-4">
               <h4 className="text-sm font-medium text-slate-700 mb-3">选择要修改的字段</h4>
               <div className="grid grid-cols-2 gap-4">
-                {/* Asset Name */}
                 <div className="space-y-2">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -344,7 +339,6 @@ function BatchUpdateHistoryModal({
                   )}
                 </div>
 
-                {/* Fund Type */}
                 <div className="space-y-2">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -367,7 +361,6 @@ function BatchUpdateHistoryModal({
                   )}
                 </div>
 
-                {/* Account */}
                 <div className="space-y-2">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -390,7 +383,6 @@ function BatchUpdateHistoryModal({
                   )}
                 </div>
 
-                {/* Liquidity Rating */}
                 <div className="space-y-2">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -415,7 +407,6 @@ function BatchUpdateHistoryModal({
               </div>
             </div>
 
-            {/* Preview */}
             {hasSelectedFields && hasValues && (
               <div className="border-t border-slate-100 pt-4">
                 <h4 className="text-sm font-medium text-slate-700 mb-3">修改预览</h4>
@@ -455,7 +446,6 @@ function BatchUpdateHistoryModal({
               </div>
             )}
 
-            {/* Actions */}
             <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
               <button onClick={onClose}
                 className="px-4 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">取消</button>
@@ -490,11 +480,10 @@ function NewBatchEditModal({
   onClose: () => void
   fundTypes: FundType[]
   accounts: Account[]
-  liquidityRatings: import('@/types').LiquidityRating[]
+  liquidityRatings: LiquidityRating[]
   assetNames: string[]
   onSubmit: (data: BatchUpdateAssets) => void
 }) {
-  const queryClient = useQueryClient()
   const [selectedAssetNames, setSelectedAssetNames] = useState<string[]>([])
   const [matchedRecords, setMatchedRecords] = useState<AssetRecord[]>([])
 
@@ -510,7 +499,6 @@ function NewBatchEditModal({
     liquidity_rating_id: ''
   })
 
-  // Load records when asset names are selected
   useEffect(() => {
     if (selectedAssetNames.length > 0) {
       api.getAssetsByNames(selectedAssetNames).then(records => {
@@ -542,24 +530,20 @@ function NewBatchEditModal({
   return (
     <Modal open={open} onClose={onClose} title="批量修改资产" size="xl">
       <div className="space-y-6">
-        {/* Step 1: Select Asset Names */}
-        {/* <div className="bg-slate-50 rounded-lg p-4"> */}
-          <h4 className="text-sm font-medium text-slate-700 mb-3">步骤 1: 选择要修改的资产</h4>
-          <MultiSelectDropdown
-            label="资产名称"
-            options={assetNames}
-            selected={selectedAssetNames}
-            onChange={setSelectedAssetNames}
-            placeholder="请选择资产名称（可多选）"
-          />
-          {hasSelectedAssets && (
-            <p className="mt-2 text-sm text-brand-600">
-              已选择 {selectedAssetNames.length} 个资产，共 {matchedRecords.length} 条记录
-            </p>
-          )}
-        {/* </div> */}
+        <h4 className="text-sm font-medium text-slate-700 mb-3">步骤 1: 选择要修改的资产</h4>
+        <MultiSelectDropdown
+          label="资产名称"
+          options={assetNames}
+          selected={selectedAssetNames}
+          onChange={setSelectedAssetNames}
+          placeholder="请选择资产名称（可多选）"
+        />
+        {hasSelectedAssets && (
+          <p className="mt-2 text-sm text-brand-600">
+            已选择 {selectedAssetNames.length} 个资产，共 {matchedRecords.length} 条记录
+          </p>
+        )}
 
-        {/* Step 2: Show matched records */}
         {hasSelectedAssets && matchedRecords.length > 0 && (
           <div>
             <h4 className="text-sm font-medium text-slate-700 mb-3">匹配的记录</h4>
@@ -592,7 +576,6 @@ function NewBatchEditModal({
           </div>
         )}
 
-        {/* Step 3: Edit Fields */}
         {hasSelectedAssets && matchedRecords.length > 0 && (
           <div className="border-t border-slate-100 pt-4">
             <h4 className="text-sm font-medium text-slate-700 mb-3">步骤 2: 设置要修改的字段（留空表示不修改）</h4>
@@ -664,8 +647,8 @@ function NewBatchEditModal({
 }
 
 // --- Record Form ---
-function RecordForm({ fundTypes, accounts, liquidityRatings, initial, onSubmit, onCancel, onBatchHistory, isEditing = false }: {
-  fundTypes: FundType[]; accounts: Account[]; liquidityRatings: import('@/types').LiquidityRating[]
+function RecordForm({ fundTypes, accounts, liquidityRatings, assetOwners, initial, onSubmit, onCancel, onBatchHistory, isEditing = false }: {
+  fundTypes: FundType[]; accounts: Account[]; liquidityRatings: LiquidityRating[]; assetOwners: AssetOwner[]
   initial?: Partial<AssetRecordCreate>; onSubmit: (data: AssetRecordCreate) => void; onCancel: () => void
   onBatchHistory?: () => void
   isEditing?: boolean
@@ -676,6 +659,7 @@ function RecordForm({ fundTypes, accounts, liquidityRatings, initial, onSubmit, 
     fund_type_id: initial?.fund_type_id || (fundTypes[0]?.id ?? 1),
     asset_name: initial?.asset_name || '',
     account_id: initial?.account_id || (accounts[0]?.id ?? 1),
+    owner_id: initial?.owner_id,
     amount: initial?.amount || '0',
   })
 
@@ -722,6 +706,17 @@ function RecordForm({ fundTypes, accounts, liquidityRatings, initial, onSubmit, 
             className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" />
         </div>
         <div>
+          <label className="block text-sm font-medium text-slate-600 mb-1">资产拥有者</label>
+          <select
+            value={form.owner_id || ''}
+            onChange={(e) => setForm({ ...form, owner_id: e.target.value ? parseInt(e.target.value) : undefined })}
+            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
+          >
+            <option value="">请选择</option>
+            {assetOwners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        </div>
+        <div>
           <label className="block text-sm font-medium text-slate-600 mb-1">金额 (元)</label>
           <input type="number" step="0.01" value={form.amount}
             onChange={(e) => setForm({ ...form, amount: e.target.value })}
@@ -757,7 +752,6 @@ function CopyFromLastPanel({ fundTypes, accounts, onClose }: {
   const [periodType, setPeriodType] = useState('month')
   const [drafts, setDrafts] = useState<Record<string, unknown>[]>([])
   const [sourceDate, setSourceDate] = useState<string>('')
-  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null)
 
   const copyMutation = useMutation({
     mutationFn: () => api.copyFromLast(newRecordDate, periodType),
@@ -788,32 +782,6 @@ function CopyFromLastPanel({ fundTypes, accounts, onClose }: {
     saveMutation.mutate(records)
   }
 
-  // Sorting function
-  const handleSort = (key: string) => {
-    let direction: 'asc' | 'desc' = 'asc'
-    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
-      direction = 'desc'
-    }
-    setSortConfig({ key, direction })
-
-    const sortedDrafts = [...drafts].sort((a, b) => {
-      const aValue = (a[key] as string) || ''
-      const bValue = (b[key] as string) || ''
-      if (direction === 'asc') {
-        return aValue.localeCompare(bValue)
-      }
-      return bValue.localeCompare(aValue)
-    })
-    setDrafts(sortedDrafts)
-  }
-
-  const getSortIcon = (key: string) => {
-    if (!sortConfig || sortConfig.key !== key) {
-      return <span className="text-slate-300 ml-1">↕</span>
-    }
-    return sortConfig.direction === 'asc' ? <span className="text-brand-600 ml-1">↑</span> : <span className="text-brand-600 ml-1">↓</span>
-  }
-
   return (
     <div className="space-y-4">
       <div className="flex gap-4 items-end">
@@ -840,52 +808,62 @@ function CopyFromLastPanel({ fundTypes, accounts, onClose }: {
 
       {drafts.length > 0 && (
         <>
-          <div className="max-h-[400px] overflow-auto border border-slate-200 rounded-lg">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 sticky top-0">
-                <tr>
-                  <th
-                    className="text-left px-3 py-2 text-slate-600 font-medium cursor-pointer hover:bg-slate-100 select-none"
-                    onClick={() => handleSort('asset_name')}
-                  >
-                    资产名称 {getSortIcon('asset_name')}
-                  </th>
-                  <th
-                    className="text-left px-3 py-2 text-slate-600 font-medium cursor-pointer hover:bg-slate-100 select-none"
-                    onClick={() => handleSort('account_name')}
-                  >
-                    账户 {getSortIcon('account_name')}
-                  </th>
-                  <th className="text-right px-3 py-2 text-slate-600 font-medium">金额</th>
-                </tr>
-              </thead>
-              <tbody>
-                {drafts.map((d, i) => (
-                  <tr key={i} className="border-t border-slate-100 hover:bg-slate-50/50">
-                    <td className="px-3 py-2">{d.asset_name as string}</td>
-                    <td className="px-3 py-2 text-slate-500">{d.account_name as string}</td>
-                    <td className="px-3 py-2 text-right">
-                      <input type="number" step="0.01"
-                        value={d.amount as string}
-                        onChange={(e) => {
-                          const newDrafts = [...drafts]
-                          newDrafts[i] = { ...newDrafts[i], amount: e.target.value }
-                          setDrafts(newDrafts)
-                        }}
-                        className="w-32 text-right px-2 py-1 border border-slate-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-brand-400" />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table
+            dataSource={drafts.map((d, i) => ({ ...d, key: i }))}
+            columns={[
+              {
+                title: '资产名称',
+                dataIndex: 'asset_name',
+                key: 'asset_name',
+                sorter: (a, b) => String(a.asset_name).localeCompare(String(b.asset_name)),
+              },
+              {
+                title: '账户',
+                dataIndex: 'account_name',
+                key: 'account_name',
+                sorter: (a, b) => String(a.account_name).localeCompare(String(b.account_name)),
+              },
+              {
+                title: '金额',
+                dataIndex: 'amount',
+                key: 'amount',
+                align: 'right',
+                sorter: (a, b) => parseFloat(String(a.amount || 0)) - parseFloat(String(b.amount || 0)),
+                render: (value, record) => {
+                  // 使用 record.key（原始索引）来更新数据，而不是 render 的 index 参数
+                  const originalIndex = record.key as number
+                  return (
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={value as string}
+                      onChange={(e) => {
+                        const newDrafts = [...drafts]
+                        newDrafts[originalIndex] = { ...newDrafts[originalIndex], amount: e.target.value }
+                        setDrafts(newDrafts)
+                      }}
+                      style={{ width: 120, textAlign: 'right' }}
+                    />
+                  )
+                },
+              },
+            ]}
+            pagination={false}
+            scroll={{ y: 400 }}
+            size="small"
+          />
           <div className="flex justify-end gap-3">
-            <button onClick={onClose}
-              className="px-4 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">取消</button>
-            <button onClick={handleSave} disabled={saveMutation.isPending}
-              className="px-4 py-2 text-sm text-white bg-brand-600 rounded-lg hover:bg-brand-700 disabled:opacity-50">
+            <Button onClick={onClose}>
+              取消
+            </Button>
+            <Button
+              type="primary"
+              onClick={handleSave}
+              disabled={saveMutation.isPending}
+              loading={saveMutation.isPending}
+            >
               {saveMutation.isPending ? '保存中...' : `保存 ${drafts.length} 条记录`}
-            </button>
+            </Button>
           </div>
         </>
       )}
@@ -898,11 +876,13 @@ function BatchCreateByPeriodPanel({
   fundTypes,
   accounts,
   liquidityRatings,
+  assetOwners,
   onClose,
 }: {
   fundTypes: FundType[]
   accounts: Account[]
   liquidityRatings: LiquidityRating[]
+  assetOwners: AssetOwner[]
   onClose: () => void
 }) {
   const queryClient = useQueryClient()
@@ -914,13 +894,13 @@ function BatchCreateByPeriodPanel({
     liquidity_rating_id: liquidityRatings[0]?.id || 0,
     fund_type_id: '',
     account_id: '',
+    owner_id: '',
     asset_name: '',
     amount: '',
   })
   const [previewResult, setPreviewResult] = useState<BatchCreateByPeriodResult | null>(null)
   const [conflictResolution, setConflictResolution] = useState<'skip' | 'overwrite'>('skip')
 
-  // 获取叶子节点资产类型
   const leafTypes = useMemo(() => {
     const leaves: FundType[] = []
     function traverse(nodes: FundType[]) {
@@ -936,7 +916,6 @@ function BatchCreateByPeriodPanel({
     return leaves
   }, [fundTypes])
 
-  // 初始化默认值
   useEffect(() => {
     if (leafTypes.length > 0 && !form.fund_type_id) {
       setForm((prev) => ({ ...prev, fund_type_id: String(leafTypes[0].id) }))
@@ -953,6 +932,7 @@ function BatchCreateByPeriodPanel({
           liquidity_rating_id: Number(form.liquidity_rating_id),
           fund_type_id: Number(form.fund_type_id),
           account_id: Number(form.account_id),
+          owner_id: form.owner_id ? Number(form.owner_id) : undefined,
           asset_name: form.asset_name,
           amount: Number(form.amount).toFixed(2),
         },
@@ -971,7 +951,7 @@ function BatchCreateByPeriodPanel({
 
   const handlePreview = () => {
     if (!form.asset_name || !form.amount) {
-      alert('请填写完整的记录信息')
+      message.error('请填写完整的记录信息')
       return
     }
     setStep('preview')
@@ -981,7 +961,6 @@ function BatchCreateByPeriodPanel({
     batchCreateMutation.mutate()
   }
 
-  // 获取账期示例
   const getPeriodExample = () => {
     switch (periodType) {
       case 'day':
@@ -1091,7 +1070,6 @@ function BatchCreateByPeriodPanel({
 
   return (
     <div className="space-y-4">
-      {/* 账期设置 */}
       <div className="p-4 bg-slate-50 rounded-lg space-y-3">
         <h4 className="font-medium text-slate-700">账期设置</h4>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -1134,7 +1112,6 @@ function BatchCreateByPeriodPanel({
         </div>
       </div>
 
-      {/* 记录模板 */}
       <div className="p-4 bg-slate-50 rounded-lg space-y-3">
         <h4 className="font-medium text-slate-700">记录信息</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1142,7 +1119,7 @@ function BatchCreateByPeriodPanel({
             <label className="block text-sm font-medium text-slate-600 mb-1">流动性评级</label>
             <select
               value={form.liquidity_rating_id}
-              onChange={(e) => setForm({ ...form, liquidity_rating_id: Number(e.target.value) })}
+              onChange={(e) => setForm((prev) => ({ ...prev, liquidity_rating_id: Number(e.target.value) }))}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
             >
               {liquidityRatings.map((r) => (
@@ -1156,7 +1133,7 @@ function BatchCreateByPeriodPanel({
             <label className="block text-sm font-medium text-slate-600 mb-1">资产类型</label>
             <select
               value={form.fund_type_id}
-              onChange={(e) => setForm({ ...form, fund_type_id: e.target.value })}
+              onChange={(e) => setForm((prev) => ({ ...prev, fund_type_id: e.target.value }))}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
             >
               {leafTypes.map((ft) => (
@@ -1170,7 +1147,7 @@ function BatchCreateByPeriodPanel({
             <label className="block text-sm font-medium text-slate-600 mb-1">账户</label>
             <select
               value={form.account_id}
-              onChange={(e) => setForm({ ...form, account_id: e.target.value })}
+              onChange={(e) => setForm((prev) => ({ ...prev, account_id: e.target.value }))}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
             >
               {accounts.map((a) => (
@@ -1181,22 +1158,37 @@ function BatchCreateByPeriodPanel({
             </select>
           </div>
           <div>
+            <label className="block text-sm font-medium text-slate-600 mb-1">资产拥有者</label>
+            <select
+              value={form.owner_id}
+              onChange={(e) => setForm((prev) => ({ ...prev, owner_id: e.target.value }))}
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
+            >
+              <option value="">请选择</option>
+              {assetOwners.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
             <label className="block text-sm font-medium text-slate-600 mb-1">资产名称</label>
             <input
               type="text"
               value={form.asset_name}
-              onChange={(e) => setForm({ ...form, asset_name: e.target.value })}
+              onChange={(e) => setForm((prev) => ({ ...prev, asset_name: e.target.value }))}
               placeholder="如: 定期存款"
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
             />
           </div>
-          <div className="md:col-span-2">
+          <div>
             <label className="block text-sm font-medium text-slate-600 mb-1">金额 (元)</label>
             <input
               type="number"
               step="0.01"
               value={form.amount}
-              onChange={(e) => setForm({ ...form, amount: e.target.value })}
+              onChange={(e) => setForm((prev) => ({ ...prev, amount: e.target.value }))}
               placeholder="0.00"
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
             />
@@ -1219,9 +1211,10 @@ function BatchCreateByPeriodPanel({
 // --- Main Page ---
 export default function RecordsPage() {
   const queryClient = useQueryClient()
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
-  const [searchName, setSearchName] = useState('')
+  const actionRef = useRef<ActionType>()
+  const [selectedIds, setSelectedIds] = useState<number[]>([])
+
+  // Modal states
   const [showAddModal, setShowAddModal] = useState(false)
   const [showCopyModal, setShowCopyModal] = useState(false)
   const [showBatchCreateByPeriodModal, setShowBatchCreateByPeriodModal] = useState(false)
@@ -1229,66 +1222,36 @@ export default function RecordsPage() {
   const [showBatchEditModal, setShowBatchEditModal] = useState(false)
   const [showBatchHistoryModal, setShowBatchHistoryModal] = useState(false)
   const [editingAssetName, setEditingAssetName] = useState<string>('')
-  const [batchUpdateSummary, setBatchUpdateSummary] = useState<{
-    show: boolean
-    count: number
-    changes: string[]
-  }>({ show: false, count: 0, changes: [] })
 
-  // Period type filtering
-  const [periodType, setPeriodType] = useState<string>('custom')
-  const [year, setYear] = useState<number | ''>('')
-  const [quarter, setQuarter] = useState<number | ''>('')
-  const [month, setMonth] = useState<number | ''>('')
-  const [day, setDay] = useState<number | ''>('')
-  const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
-
-  const params: Record<string, string> = { page: String(page), page_size: String(pageSize) }
-  if (searchName) params.asset_name = searchName
-
-  // Handle period type params
-  if (periodType && periodType !== 'all') {
-    params.period_type = periodType
-    if (periodType === 'year' && year) {
-      params.year = String(year)
-    } else if (periodType === 'quarter' && year && quarter) {
-      params.year = String(year)
-      params.quarter = String(quarter)
-    } else if (periodType === 'month' && year && month) {
-      params.year = String(year)
-      params.month = String(month)
-    } else if (periodType === 'day' && year && month && day) {
-      params.year = String(year)
-      params.month = String(month)
-      params.day = String(day)
-    } else if (periodType === 'custom') {
-      if (startDate) params.date_from = startDate
-      if (endDate) params.date_to = endDate
-    }
-  }
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['assets', params],
-    queryFn: () => api.getAssets(params),
-  })
+  // Data queries
   const { data: fundTypes } = useQuery({ queryKey: ['fundTypes'], queryFn: api.getFundTypes })
   const { data: accounts } = useQuery({ queryKey: ['accounts'], queryFn: api.getAccounts })
   const { data: liquidityRatings } = useQuery({ queryKey: ['liquidityRatings'], queryFn: api.getLiquidityRatings })
+  const { data: assetOwners } = useQuery({ queryKey: ['assetOwners'], queryFn: api.getAssetOwners })
   const { data: assetNames } = useQuery({ queryKey: ['assetNames'], queryFn: api.getAssetNames })
 
+  // Get leaf types for fund type filter
+  const leafTypes = fundTypes?.filter((ft) => !fundTypes.some((c) => c.parent_id === ft.id)) || []
+
+  // Mutations
   const createMutation = useMutation({
     mutationFn: api.createAsset,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assets'] })
       queryClient.invalidateQueries({ queryKey: ['dates'] })
       setShowAddModal(false)
+      actionRef.current?.reload()
+      message.success('创建成功')
     },
   })
 
   const deleteMutation = useMutation({
     mutationFn: api.deleteAsset,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['assets'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['assets'] })
+      actionRef.current?.reload()
+      message.success('删除成功')
+    },
   })
 
   const updateMutation = useMutation({
@@ -1296,6 +1259,8 @@ export default function RecordsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assets'] })
       setEditingId(null)
+      actionRef.current?.reload()
+      message.success('更新成功')
     },
   })
 
@@ -1304,427 +1269,373 @@ export default function RecordsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assets'] })
       setShowBatchEditModal(false)
+      actionRef.current?.reload()
+      message.success('批量更新成功')
     },
   })
-
-  // Batch selection states
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
-  const [showBatchDeleteConfirm, setShowBatchDeleteConfirm] = useState(false)
 
   const batchDeleteMutation = useMutation({
     mutationFn: (ids: number[]) => api.batchDeleteAssets(ids),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assets'] })
-      setSelectedIds(new Set())
-      setShowBatchDeleteConfirm(false)
+      setSelectedIds([])
+      actionRef.current?.reload()
+      message.success('批量删除成功')
     },
   })
 
-  // Selection handlers
-  const toggleSelect = (id: number) => {
-    const newSet = new Set(selectedIds)
-    if (newSet.has(id)) {
-      newSet.delete(id)
-    } else {
-      newSet.add(id)
-    }
-    setSelectedIds(newSet)
-  }
+  // Table columns definition
+  const columns: ProColumns<AssetRecord>[] = [
+    {
+      title: '日期',
+      dataIndex: 'asset_date',
+      key: 'asset_date',
+      width: 120,
+      sorter: true,
+      render: (_, record) => formatDate(record.asset_date),
+      valueType: 'dateRange',
+      search: {
+        transform: (value) => ({
+          date_from: value[0],
+          date_to: value[1],
+        }),
+      },
+    },
+    {
+      title: '资产名称',
+      dataIndex: 'asset_name',
+      key: 'asset_name',
+      width: 180,
+      sorter: true,
+      render: (_, record) => <span className="font-medium text-brand-950">{record.asset_name}</span>,
+    },
+    {
+      title: '资产类型',
+      dataIndex: 'fund_type_name',
+      key: 'fund_type_id',
+      width: 140,
+      filters: leafTypes.map(ft => ({ text: ft.name, value: ft.id })),
+      valueType: 'select',
+      fieldProps: {
+        options: leafTypes.map(ft => ({ label: ft.name, value: ft.id })),
+        mode: 'multiple',
+      },
+      search: {
+        transform: (value) => ({ fund_type_id: value.join(',') }),
+      },
+    },
+    {
+      title: '账户',
+      dataIndex: 'account_name',
+      key: 'account_id',
+      width: 140,
+      filters: accounts?.map(a => ({ text: a.name, value: a.id })) || [],
+      valueType: 'select',
+      fieldProps: {
+        options: accounts?.map(a => ({ label: a.name, value: a.id })) || [],
+        mode: 'multiple',
+      },
+      search: {
+        transform: (value) => ({ account_id: value.join(',') }),
+      },
+    },
+    {
+      title: '流动性评级',
+      dataIndex: 'liquidity_rating_name',
+      key: 'liquidity_rating_id',
+      width: 120,
+      filters: liquidityRatings?.map(lr => ({ text: lr.name, value: lr.id })) || [],
+      valueType: 'select',
+      fieldProps: {
+        options: liquidityRatings?.map(lr => ({ label: lr.name, value: lr.id })) || [],
+        mode: 'multiple',
+      },
+      search: {
+        transform: (value) => ({ liquidity_rating_id: value.join(',') }),
+      },
+      render: (_, record) => (
+        <Tag color="blue">{record.liquidity_rating_name}</Tag>
+      ),
+    },
+    {
+      title: '资产拥有者',
+      dataIndex: 'owner_name',
+      key: 'owner_id',
+      width: 120,
+      filters: assetOwners?.map(o => ({ text: o.name, value: o.id })) || [],
+      valueType: 'select',
+      fieldProps: {
+        options: assetOwners?.map(o => ({ label: o.name, value: o.id })) || [],
+        mode: 'multiple',
+      },
+      search: {
+        transform: (value) => ({ owner_id: value.join(',') }),
+      },
+      render: (_, record) => record.owner_name || '-',
+    },
+    {
+      title: '金额',
+      dataIndex: 'amount',
+      key: 'amount',
+      width: 140,
+      align: 'right',
+      sorter: true,
+      valueType: 'digitRange',
+      search: {
+        transform: (value) => ({
+          amount_min: value[0],
+          amount_max: value[1],
+        }),
+      },
+      render: (_, record) => (
+        <span className={`font-mono ${parseFloat(record.amount) >= 0 ? 'amount-positive' : 'amount-negative'}`}>
+          {formatAmount(record.amount)}
+        </span>
+      ),
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 120,
+      fixed: 'right',
+      search: false,
+      render: (_, record) => (
+        <Space>
+          <Button
+            type="text"
+            icon={<Pencil size={14} />}
+            onClick={() => setEditingId(record.id)}
+          />
+          <Popconfirm
+            title="确认删除"
+            description="确定要删除这条记录吗？"
+            onConfirm={() => deleteMutation.mutate(record.id)}
+            okText="确定"
+            cancelText="取消"
+          >
+            <Button
+              type="text"
+              danger
+              icon={<Trash2 size={14} />}
+            />
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ]
 
-  const toggleSelectAll = () => {
-    if (data?.items) {
-      if (selectedIds.size === data.items.length) {
-        setSelectedIds(new Set())
-      } else {
-        setSelectedIds(new Set(data.items.map(r => r.id)))
+  // Fetch data function for ProTable
+  const fetchData = useCallback(async (params: any, sort: any, filter: any) => {
+    const queryParams: Record<string, string> = {
+      page: String(params.current || 1),
+      page_size: String(params.pageSize || 10),
+    }
+
+    // Add search params
+    if (params.asset_name) {
+      queryParams.asset_name = params.asset_name
+    }
+
+    // Add date range
+    if (params.date_from) {
+      queryParams.date_from = params.date_from
+    }
+    if (params.date_to) {
+      queryParams.date_to = params.date_to
+    }
+
+    // Add fund type filter
+    if (params.fund_type_id) {
+      queryParams.fund_type_id = params.fund_type_id
+    }
+
+    // Add account filter
+    if (params.account_id) {
+      queryParams.account_id = params.account_id
+    }
+
+    // Add liquidity rating filter
+    if (params.liquidity_rating_id) {
+      queryParams.liquidity_rating_id = params.liquidity_rating_id
+    }
+
+    // Add owner filter
+    if (params.owner_id) {
+      queryParams.owner_id = params.owner_id
+    }
+
+    // Add amount range
+    if (params.amount_min) {
+      queryParams.amount_min = params.amount_min
+    }
+    if (params.amount_max) {
+      queryParams.amount_max = params.amount_max
+    }
+
+    // Add sorting
+    if (sort) {
+      const sortField = Object.keys(sort)[0]
+      if (sortField) {
+        queryParams.sort_field = sortField
+        queryParams.sort_order = sort[sortField] === 'ascend' ? 'asc' : 'desc'
       }
     }
+
+    const response = await api.getAssets(queryParams)
+
+    return {
+      data: response.items,
+      success: true,
+      total: response.total,
+    }
+  }, [])
+
+  // Row selection config
+  const rowSelection = {
+    selectedRowKeys: selectedIds,
+    onChange: (selectedRowKeys: React.Key[]) => {
+      setSelectedIds(selectedRowKeys as number[])
+    },
   }
+
+  // Get editing record
+  const editingRecord = editingId
+    ? (actionRef.current as any)?.pageData?.find((r: AssetRecord) => r.id === editingId)
+    : null
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Batch Update Summary Toast */}
-      {batchUpdateSummary.show && (
-        <div className="fixed top-4 right-4 z-50 bg-green-50 border border-green-200 rounded-lg shadow-lg p-4 max-w-md animate-slide-in-right">
-          <div className="flex items-start gap-3">
-            <div className="flex-shrink-0 w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
-              <Check size={16} className="text-green-600" />
-            </div>
-            <div className="flex-1">
-              <h4 className="text-sm font-medium text-green-800">
-                批量修改成功
-              </h4>
-              <p className="text-sm text-green-700 mt-1">
-                已修改 {batchUpdateSummary.count} 条历史记录
-              </p>
-              {batchUpdateSummary.changes.length > 0 && (
-                <div className="mt-2 space-y-1">
-                  <p className="text-xs text-green-600 font-medium">修改内容：</p>
-                  <ul className="text-xs text-green-700 space-y-0.5">
-                    {batchUpdateSummary.changes.map((change, idx) => (
-                      <li key={idx} className="flex items-center gap-1">
-                        <span className="w-1 h-1 bg-green-500 rounded-full"></span>
-                        {change}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-            <button
-              onClick={() => setBatchUpdateSummary(prev => ({ ...prev, show: false }))}
-              className="text-green-400 hover:text-green-600"
-            >
-              <X size={16} />
-            </button>
-          </div>
-        </div>
-      )}
-
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-brand-950">资产记录</h1>
-          <p className="text-sm text-slate-500 mt-1">共 {data?.total || 0} 条记录</p>
         </div>
-        <div className="flex gap-2">
-          <button onClick={() => setShowBatchEditModal(true)}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm border border-brand-300 rounded-lg hover:bg-brand-50 text-brand-700">
-            <Edit3 size={16} /> 批量修改
-          </button>
-          <button onClick={() => setShowCopyModal(true)}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-700">
-            <Copy size={16} /> 复制上期
-          </button>
-          <button onClick={() => setShowBatchCreateByPeriodModal(true)}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm border border-brand-300 rounded-lg hover:bg-brand-50 text-brand-700">
-            <CalendarPlus size={16} /> 批量按账期添加
-          </button>
-          <button onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm text-white bg-brand-600 rounded-lg hover:bg-brand-700">
-            <Plus size={16} /> 新增记录
-          </button>
-        </div>
-      </div>
-
-      {/* Filters */}
-        <div className="flex flex-wrap gap-3 items-center">
-          {/* Period Type Selector */}
-          <select
-            value={periodType}
-            onChange={(e) => {
-              setPeriodType(e.target.value)
-              setYear('')
-              setQuarter('')
-              setMonth('')
-              setDay('')
-              setStartDate('')
-              setEndDate('')
-              setPage(1)
-            }}
-            className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 bg-white"
+        <Space>
+          <Button
+            icon={<Edit3 size={16} />}
+            onClick={() => setShowBatchEditModal(true)}
           >
-            <option value="all">全部</option>
-            <option value="year">按年</option>
-            <option value="quarter">按季度</option>
-            <option value="month">按月</option>
-            <option value="day">按日</option>
-            <option value="custom">自定义日期范围</option>
-          </select>
-
-          {/* Year Selector */}
-          {(periodType === 'year' || periodType === 'quarter' || periodType === 'month' || periodType === 'day') && (
-            <select
-              value={year}
-              onChange={(e) => { setYear(Number(e.target.value) || ''); setPage(1) }}
-              className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 bg-white"
-            >
-              <option value="">选择年份</option>
-              {Array.from({ length: 10 }, (_, i) => dayjs().year() - 5 + i).map(y => (
-                <option key={y} value={y}>{y}年</option>
-              ))}
-            </select>
-          )}
-
-          {/* Quarter Selector */}
-          {periodType === 'quarter' && (
-            <select
-              value={quarter}
-              onChange={(e) => { setQuarter(Number(e.target.value) || ''); setPage(1) }}
-              className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 bg-white"
-            >
-              <option value="">选择季度</option>
-              {[1, 2, 3, 4].map(q => (
-                <option key={q} value={q}>第{q}季度</option>
-              ))}
-            </select>
-          )}
-
-          {/* Month Selector */}
-          {(periodType === 'month' || periodType === 'day') && (
-            <select
-              value={month}
-              onChange={(e) => { setMonth(Number(e.target.value) || ''); setPage(1) }}
-              className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 bg-white"
-            >
-              <option value="">选择月份</option>
-              {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
-                <option key={m} value={m}>{m}月</option>
-              ))}
-            </select>
-          )}
-
-          {/* Day Selector */}
-          {periodType === 'day' && (
-            <select
-              value={day}
-              onChange={(e) => { setDay(Number(e.target.value) || ''); setPage(1) }}
-              className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 bg-white"
-            >
-              <option value="">选择日期</option>
-              {Array.from({ length: 31 }, (_, i) => i + 1).map(d => (
-                <option key={d} value={d}>{d}日</option>
-              ))}
-            </select>
-          )}
-
-          {/* Custom Date Range */}
-          {periodType === 'custom' && (
-            <div className="flex items-center gap-2">
-              <DatePicker
-                placeholder="开始日期"
-                value={startDate ? dayjs(startDate) : null}
-                onChange={(date) => {
-                  setStartDate(date ? date.format('YYYY-MM-DD') : '')
-                  setPage(1)
-                }}
-                style={{ width: 140 }}
-              />
-              <span className="text-slate-400">-</span>
-              <DatePicker
-                placeholder="结束日期"
-                value={endDate ? dayjs(endDate) : null}
-                onChange={(date) => {
-                  setEndDate(date ? date.format('YYYY-MM-DD') : '')
-                  setPage(1)
-                }}
-                style={{ width: 140 }}
-              />
-            </div>
-          )}
-
-        {/* Search */}
-        <div className="relative">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input type="text" placeholder="搜索资产名称..." value={searchName}
-            onChange={(e) => { setSearchName(e.target.value); setPage(1) }}
-            className="pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 w-56" />
-        </div>
+            批量修改
+          </Button>
+          <Button
+            icon={<Copy size={16} />}
+            onClick={() => setShowCopyModal(true)}
+          >
+            复制上期
+          </Button>
+          <Button
+            icon={<CalendarPlus size={16} />}
+            onClick={() => setShowBatchCreateByPeriodModal(true)}
+          >
+            批量按账期添加
+          </Button>
+          <Button
+            type="primary"
+            icon={<Plus size={16} />}
+            onClick={() => setShowAddModal(true)}
+            className="bg-brand-600 hover:bg-brand-700"
+          >
+            新增记录
+          </Button>
+        </Space>
       </div>
 
-      {/* Batch Action Toolbar */}
-      {selectedIds.size > 0 && (
-        <div className="flex items-center justify-between bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+      <ProTable<AssetRecord>
+        actionRef={actionRef}
+        columns={columns}
+        request={fetchData}
+        rowKey="id"
+        pagination={{
+          showSizeChanger: true,
+          showQuickJumper: true,
+          pageSizeOptions: [10, 20, 50, 100],
+          defaultPageSize: 10,
+        }}
+        rowSelection={rowSelection}
+        tableAlertRender={({ selectedRowKeys }) => (
           <div className="flex items-center gap-2">
-            <CheckSquare size={18} className="text-red-600" />
-            <span className="text-sm text-red-800">
-              已选择 <strong>{selectedIds.size}</strong> 条记录
-            </span>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setShowBatchDeleteConfirm(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-white bg-red-600 rounded-lg hover:bg-red-700"
-            >
-              <Trash2 size={14} /> 批量删除
-            </button>
-            <button
-              onClick={() => setSelectedIds(new Set())}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50"
-            >
-              <X size={14} /> 取消选择
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Table */}
-      <div className="bg-white rounded-xl shadow-card overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-slate-50 border-b border-slate-100">
-              <th className="text-left px-4 py-3 text-slate-600 font-medium w-10">
-                <button
-                  onClick={toggleSelectAll}
-                  className="p-1 rounded hover:bg-slate-200"
-                  title={selectedIds.size === (data?.items?.length || 0) ? "取消全选" : "全选"}
-                >
-                  {selectedIds.size === (data?.items?.length || 0) && (data?.items?.length || 0) > 0 ? (
-                    <CheckSquare size={18} className="text-brand-600" />
-                  ) : (
-                    <Square size={18} className="text-slate-400" />
-                  )}
-                </button>
-              </th>
-              <th className="text-left px-4 py-3 text-slate-600 font-medium">日期</th>
-              <th className="text-left px-4 py-3 text-slate-600 font-medium">资产名称</th>
-              <th className="text-left px-4 py-3 text-slate-600 font-medium">类型</th>
-              <th className="text-left px-4 py-3 text-slate-600 font-medium">账户</th>
-              <th className="text-left px-4 py-3 text-slate-600 font-medium">流动性</th>
-              <th className="text-right px-4 py-3 text-slate-600 font-medium">金额</th>
-              <th className="text-right px-4 py-3 text-slate-600 font-medium">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data?.items.map((record) => (
-              <tr key={record.id} className="border-t border-slate-50 hover:bg-slate-50/50 transition-colors">
-                <td className="px-4 py-3">
-                  <button
-                    onClick={() => toggleSelect(record.id)}
-                    className="p-1 rounded hover:bg-slate-200"
-                  >
-                    {selectedIds.has(record.id) ? (
-                      <CheckSquare size={18} className="text-brand-600" />
-                    ) : (
-                      <Square size={18} className="text-slate-400" />
-                    )}
-                  </button>
-                </td>
-                <td className="px-4 py-3 text-slate-500">{formatDate(record.asset_date)}</td>
-                <td className="px-4 py-3 font-medium text-brand-950">{record.asset_name}</td>
-                <td className="px-4 py-3 text-slate-500">{record.fund_type_name}</td>
-                <td className="px-4 py-3 text-slate-500">{record.account_name}</td>
-                <td className="px-4 py-3">
-                  <span className="inline-block px-2 py-0.5 rounded text-xs bg-brand-50 text-brand-700">
-                    {record.liquidity_rating_name}
-                  </span>
-                </td>
-                <td className={`px-4 py-3 text-right font-mono ${parseFloat(record.amount) >= 0 ? 'amount-positive' : 'amount-negative'}`}>
-                  {formatAmount(record.amount)}
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <div className="flex items-center justify-end gap-1">
-                    <button onClick={() => setEditingId(record.id)}
-                      className="p-1.5 rounded hover:bg-slate-100 text-slate-400 hover:text-brand-600">
-                      <Pencil size={14} />
-                    </button>
-                    <button onClick={() => { if (confirm('确认删除?')) deleteMutation.mutate(record.id) }}
-                      className="p-1.5 rounded hover:bg-red-50 text-slate-400 hover:text-danger">
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {isLoading && (
-              <tr><td colSpan={8} className="px-4 py-12 text-center text-slate-400">加载中...</td></tr>
-            )}
-            {!isLoading && data?.items.length === 0 && (
-              <tr><td colSpan={8} className="px-4 py-12 text-center text-slate-400">暂无数据</td></tr>
-            )}
-          </tbody>
-        </table>
-
-        {/* Pagination */}
-        {data && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-slate-500">第</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={data.total_pages}
-                  value={page}
-                  onChange={(e) => {
-                    const newPage = parseInt(e.target.value) || 1
-                    if (newPage >= 1 && newPage <= data.total_pages) {
-                      setPage(newPage)
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      const newPage = parseInt((e.target as HTMLInputElement).value) || 1
-                      const validPage = Math.max(1, Math.min(data.total_pages, newPage))
-                      setPage(validPage)
-                    }
-                  }}
-                  className="w-16 px-2 py-1 text-sm text-center border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-brand-400"
-                />
-                <span className="text-sm text-slate-500">/ {data.total_pages} 页</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-slate-500">每页</span>
-                <select
-                  value={pageSize}
-                  onChange={(e) => {
-                    setPageSize(Number(e.target.value))
-                    setPage(1)
-                  }}
-                  className="px-2 py-1 text-sm border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-brand-400"
-                >
-                  {[10, 30, 50, 100, 300, 500, 1000].map(size => (
-                    <option key={size} value={size}>{size}</option>
-                  ))}
-                </select>
-                <span className="text-sm text-slate-500">条</span>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button 
-                onClick={() => setPage(Math.max(1, page - 10))} 
-                disabled={page <= 1}
-                className="px-2 py-1.5 text-xs rounded hover:bg-slate-100 disabled:opacity-30"
-              >
-                -10
-              </button>
-              <button onClick={() => setPage(Math.max(1, page - 1))} disabled={page <= 1}
-                className="p-1.5 rounded hover:bg-slate-100 disabled:opacity-30"><ChevronLeft size={16} /></button>
-              <button onClick={() => setPage(Math.min(data.total_pages, page + 1))} disabled={page >= data.total_pages}
-                className="p-1.5 rounded hover:bg-slate-100 disabled:opacity-30"><ChevronRight size={16} /></button>
-              <button 
-                onClick={() => setPage(Math.min(data.total_pages, page + 10))} 
-                disabled={page >= data.total_pages}
-                className="px-2 py-1.5 text-xs rounded hover:bg-slate-100 disabled:opacity-30"
-              >
-                +10
-              </button>
-            </div>
+            <span>已选择 <strong>{selectedRowKeys.length}</strong> 条记录</span>
           </div>
         )}
-      </div>
+        tableAlertOptionRender={({ selectedRowKeys }) => (
+          <Space>
+            <Button
+              danger
+              size="small"
+              icon={<Trash2 size={14} />}
+              onClick={() => batchDeleteMutation.mutate(selectedRowKeys as number[])}
+            >
+              批量删除
+            </Button>
+            <Button
+              size="small"
+              onClick={() => setSelectedIds([])}
+            >
+              取消选择
+            </Button>
+          </Space>
+        )}
+        search={{
+          labelWidth: 'auto',
+          defaultCollapsed: false,
+          optionRender: (searchConfig, formProps, dom) => [
+            ...dom,
+            <Button
+              key="reset"
+              onClick={() => {
+                formProps.form?.resetFields()
+                actionRef.current?.reload()
+              }}
+            >
+              重置
+            </Button>,
+          ],
+        }}
+        toolBarRender={false}
+        cardProps={false}
+        className="bg-white rounded-xl shadow-card"
+        scroll={{ x: 1200 }}
+      />
 
       {/* Add Modal */}
       <Modal open={showAddModal} onClose={() => setShowAddModal(false)} title="新增资产记录">
-        {fundTypes && accounts && liquidityRatings && (
-          <RecordForm fundTypes={fundTypes} accounts={accounts} liquidityRatings={liquidityRatings}
-            onSubmit={(data) => createMutation.mutate(data)} onCancel={() => setShowAddModal(false)} />
+        {fundTypes && accounts && liquidityRatings && assetOwners && (
+          <RecordForm
+            fundTypes={fundTypes}
+            accounts={accounts}
+            liquidityRatings={liquidityRatings}
+            assetOwners={assetOwners}
+            onSubmit={(data) => createMutation.mutate(data)}
+            onCancel={() => setShowAddModal(false)}
+          />
         )}
       </Modal>
 
       {/* Edit Modal */}
       <Modal open={editingId !== null} onClose={() => setEditingId(null)} title="编辑资产记录">
-        {editingId && fundTypes && accounts && liquidityRatings && (() => {
-          const record = data?.items.find((r) => r.id === editingId)
-          if (!record) return null
-          return (
-            <RecordForm fundTypes={fundTypes} accounts={accounts} liquidityRatings={liquidityRatings}
-              initial={{
-                asset_date: record.asset_date,
-                liquidity_rating_id: record.liquidity_rating_id,
-                fund_type_id: record.fund_type_id,
-                asset_name: record.asset_name,
-                account_id: record.account_id,
-                amount: record.amount,
-              }}
-              onSubmit={(data) => updateMutation.mutate({ id: editingId, data })}
-              onCancel={() => setEditingId(null)}
-              onBatchHistory={() => {
-                setEditingAssetName(record.asset_name)
-                setShowBatchHistoryModal(true)
-              }}
-              isEditing={true} />
-          )
-        })()}
+        {editingRecord && fundTypes && accounts && liquidityRatings && assetOwners && (
+          <RecordForm
+            fundTypes={fundTypes}
+            accounts={accounts}
+            liquidityRatings={liquidityRatings}
+            assetOwners={assetOwners}
+            initial={{
+              asset_date: editingRecord.asset_date,
+              liquidity_rating_id: editingRecord.liquidity_rating_id,
+              fund_type_id: editingRecord.fund_type_id,
+              asset_name: editingRecord.asset_name,
+              account_id: editingRecord.account_id,
+              owner_id: editingRecord.owner_id || undefined,
+              amount: editingRecord.amount,
+            }}
+            onSubmit={(data) => updateMutation.mutate({ id: editingId!, data })}
+            onCancel={() => setEditingId(null)}
+            onBatchHistory={() => {
+              setEditingAssetName(editingRecord.asset_name)
+              setShowBatchHistoryModal(true)
+            }}
+            isEditing={true}
+          />
+        )}
       </Modal>
 
       {/* Copy Modal */}
@@ -1736,11 +1647,12 @@ export default function RecordsPage() {
 
       {/* Batch Create By Period Modal */}
       <Modal open={showBatchCreateByPeriodModal} onClose={() => setShowBatchCreateByPeriodModal(false)} title="批量按账期添加记录" size="lg">
-        {fundTypes && accounts && liquidityRatings && (
+        {fundTypes && accounts && liquidityRatings && assetOwners && (
           <BatchCreateByPeriodPanel
             fundTypes={fundTypes}
             accounts={accounts}
             liquidityRatings={liquidityRatings}
+            assetOwners={assetOwners}
             onClose={() => setShowBatchCreateByPeriodModal(false)}
           />
         )}
@@ -1751,10 +1663,10 @@ export default function RecordsPage() {
         <NewBatchEditModal
           open={showBatchEditModal}
           onClose={() => setShowBatchEditModal(false)}
-          fundTypes={fundTypes}
-          accounts={accounts}
-          liquidityRatings={liquidityRatings}
-          assetNames={assetNames}
+          fundTypes={fundTypes as FundType[]}
+          accounts={accounts as Account[]}
+          liquidityRatings={liquidityRatings as LiquidityRating[]}
+          assetNames={assetNames as string[]}
           onSubmit={(data) => batchUpdateMutation.mutate(data)}
         />
       )}
@@ -1765,63 +1677,16 @@ export default function RecordsPage() {
           open={showBatchHistoryModal}
           onClose={() => setShowBatchHistoryModal(false)}
           assetName={editingAssetName}
-          fundTypes={fundTypes}
-          accounts={accounts}
-          liquidityRatings={liquidityRatings}
-          onSubmit={(data, summary) => {
-            batchUpdateMutation.mutate(data, {
-              onSuccess: () => {
-                // 关闭批量修改弹窗
-                setShowBatchHistoryModal(false)
-                // 关闭编辑窗口
-                setEditingId(null)
-                // 显示摘要提示
-                setBatchUpdateSummary({
-                  show: true,
-                  count: summary.count,
-                  changes: summary.changes
-                })
-                // 3秒后自动关闭提示
-                setTimeout(() => {
-                  setBatchUpdateSummary(prev => ({ ...prev, show: false }))
-                }, 5000)
-              }
-            })
+          fundTypes={fundTypes as FundType[]}
+          accounts={accounts as Account[]}
+          liquidityRatings={liquidityRatings as LiquidityRating[]}
+          onSubmit={(data) => {
+            batchUpdateMutation.mutate(data)
+            setShowBatchHistoryModal(false)
+            setEditingId(null)
           }}
         />
       )}
-
-      {/* Batch Delete Confirm Modal */}
-      <Modal open={showBatchDeleteConfirm} onClose={() => setShowBatchDeleteConfirm(false)} title="确认批量删除">
-        <div className="space-y-4">
-          <div className="flex items-center gap-3 p-4 bg-red-50 rounded-lg">
-            <AlertTriangle size={24} className="text-red-600" />
-            <div>
-              <p className="text-sm font-medium text-red-800">
-                确定要删除选中的 <strong>{selectedIds.size}</strong> 条记录吗？
-              </p>
-              <p className="text-xs text-red-600 mt-1">
-                此操作不可恢复，请谨慎操作。
-              </p>
-            </div>
-          </div>
-          <div className="flex justify-end gap-3">
-            <button
-              onClick={() => setShowBatchDeleteConfirm(false)}
-              className="px-4 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"
-            >
-              取消
-            </button>
-            <button
-              onClick={() => batchDeleteMutation.mutate(Array.from(selectedIds))}
-              disabled={batchDeleteMutation.isPending}
-              className="px-4 py-2 text-sm text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50"
-            >
-              {batchDeleteMutation.isPending ? '删除中...' : '确认删除'}
-            </button>
-          </div>
-        </div>
-      </Modal>
     </div>
   )
 }

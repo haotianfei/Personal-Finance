@@ -23,6 +23,27 @@ class AccountOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# --- Asset Owner ---
+class AssetOwnerCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+
+class AssetOwnerUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
+class AssetOwnerOut(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # --- Liquidity Rating ---
 class LiquidityRatingBase(BaseModel):
     name: str
@@ -54,6 +75,7 @@ class AssetRecordCreate(BaseModel):
     fund_type_id: int
     asset_name: str
     account_id: int
+    owner_id: Optional[int] = None
     amount: Decimal
 
 
@@ -63,6 +85,7 @@ class AssetRecordUpdate(BaseModel):
     fund_type_id: Optional[int] = None
     asset_name: Optional[str] = None
     account_id: Optional[int] = None
+    owner_id: Optional[int] = None
     amount: Optional[Decimal] = None
 
 
@@ -76,6 +99,8 @@ class AssetRecordOut(BaseModel):
     asset_name: str
     account_id: int
     account_name: Optional[str] = None
+    owner_id: Optional[int] = None
+    owner_name: Optional[str] = None
     amount: Decimal
     import_batch_id: Optional[int] = None
     created_at: datetime
@@ -122,11 +147,12 @@ class CopyFromLastRequest(BaseModel):
 class AssetRecordTemplate(BaseModel):
     """资产记录模板（不含日期，用于批量创建）"""
     model_config = {"arbitrary_types_allowed": True}
-    
+
     liquidity_rating_id: int
     fund_type_id: int
     asset_name: str
     account_id: int
+    owner_id: Optional[int] = None
     amount: Decimal
 
 

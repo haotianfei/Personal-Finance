@@ -46,6 +46,7 @@ export const api = {
       fund_type_id: number
       asset_name: string
       account_id: number
+      owner_id?: number
       amount: string | number
     }
     period_type: string
@@ -205,4 +206,80 @@ export const api = {
   getImportBackups: () => request<import('@/types').ImportBackup[]>('/imports/backups'),
   deleteImportBackup: (filename: string) =>
     request<{ message: string }>(`/imports/backups/${filename}`, { method: 'DELETE' }),
+
+  // Asset Owners
+  getAssetOwners: () => request<import('@/types').AssetOwner[]>('/asset-owners'),
+  createAssetOwner: (data: { name: string; description?: string }) =>
+    request<import('@/types').AssetOwner>('/asset-owners', { method: 'POST', body: JSON.stringify(data) }),
+  updateAssetOwner: (id: number, data: { name?: string; description?: string }) =>
+    request<import('@/types').AssetOwner>(`/asset-owners/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteAssetOwner: (id: number) => request<{ ok: boolean }>(`/asset-owners/${id}`, { method: 'DELETE' }),
+
+  // Data Export
+  listExports: () => request<{ total: number; files: import('@/types').ExportFile[] }>('/exports'),
+  exportTables: (tables: string[], format: 'json' | 'csv') =>
+    request<import('@/types').ExportResponse>('/exports/tables', {
+      method: 'POST',
+      body: JSON.stringify({ tables, format }),
+    }),
+  downloadExport: (filename: string) => {
+    window.open(`${BASE}/exports/download/${filename}`, '_blank')
+  },
+
+  // Database Import (.db files)
+  uploadDatabaseForImport: (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return fetch(`${BASE}/imports/db/analyze`, {
+      method: 'POST',
+      body: formData,
+    }).then(res => {
+      if (!res.ok) throw new Error('Upload failed')
+      return res.json()
+    })
+  },
+  previewImport: (tempFileId: string, tableName: string) =>
+    request<import('@/types').ImportPreviewResponse>('/imports/db/preview', {
+      method: 'POST',
+      body: JSON.stringify({ temp_file_id: tempFileId, table_name: tableName }),
+    }),
+  executeImport: (tempFileId: string, tables: string[], conflictStrategy: string) =>
+    request<import('@/types').ImportResult>('/imports/db/execute', {
+      method: 'POST',
+      body: JSON.stringify({
+        temp_file_id: tempFileId,
+        table_configs: tables.map(table_name => ({
+          table_name,
+          conflict_strategy: conflictStrategy,
+          merge_rules: {}
+        })),
+      }),
+    }),
+
+  // Data File Import (CSV/JSON files)
+  uploadDataFileForImport: (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return fetch(`${BASE}/imports/data/analyze`, {
+      method: 'POST',
+      body: formData,
+    }).then(res => {
+      if (!res.ok) throw new Error('Upload failed')
+      return res.json()
+    })
+  },
+  previewDataFileImport: (tempFileId: string, tableName: string) =>
+    request<import('@/types').ImportPreviewResponse>('/imports/data/preview', {
+      method: 'POST',
+      body: JSON.stringify({ temp_file_id: tempFileId, table_name: tableName }),
+    }),
+  executeDataFileImport: (tempFileId: string, tableName: string, conflictStrategy: string) =>
+    request<import('@/types').ImportResult>('/imports/data/execute', {
+      method: 'POST',
+      body: JSON.stringify({
+        temp_file_id: tempFileId,
+        table_name: tableName,
+        conflict_strategy: conflictStrategy,
+      }),
+    }),
 }

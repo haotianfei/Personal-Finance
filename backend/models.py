@@ -52,6 +52,18 @@ class LiquidityRating(Base):
     records = relationship("AssetRecord", back_populates="liquidity_rating")
 
 
+class AssetOwner(Base):
+    __tablename__ = "asset_owners"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(50), nullable=False, unique=True)
+    description = Column(String(255), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+    records = relationship("AssetRecord", back_populates="owner")
+
+
 class AssetRecord(Base):
     __tablename__ = "asset_records"
     __table_args__ = (
@@ -60,6 +72,7 @@ class AssetRecord(Base):
         Index("ix_asset_records_fund_type", "fund_type_id"),
         Index("ix_asset_records_account", "account_id"),
         Index("ix_asset_records_liquidity_rating", "liquidity_rating_id"),
+        Index("ix_asset_records_owner", "owner_id"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -68,6 +81,7 @@ class AssetRecord(Base):
     fund_type_id = Column(Integer, ForeignKey("fund_types.id"), nullable=False)
     asset_name = Column(String(100), nullable=False)
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    owner_id = Column(Integer, ForeignKey("asset_owners.id"), nullable=True)
     amount = Column(Numeric(15, 2), nullable=False)
     import_batch_id = Column(Integer, ForeignKey("import_batches.id"), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.now)
@@ -76,6 +90,7 @@ class AssetRecord(Base):
     liquidity_rating = relationship("LiquidityRating", back_populates="records")
     fund_type = relationship("FundType", back_populates="records")
     account = relationship("Account", back_populates="records")
+    owner = relationship("AssetOwner", back_populates="records")
     import_batch = relationship("ImportBatch", back_populates="records")
 
 

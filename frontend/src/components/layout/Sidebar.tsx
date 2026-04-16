@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, FileText, BarChart3, Upload, ChevronLeft, ChevronRight,
-  Settings, FolderTree, Wallet, Download, Database, ChevronDown, Bell, PieChart
+  Settings, FolderTree, Wallet, Download, Database, ChevronDown, Bell, PieChart, Users
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -26,6 +26,8 @@ const DB_MAINTENANCE_ITEMS = [
   { href: '/fund-types', label: '资产类型管理', icon: FolderTree },
   { href: '/accounts', label: '账户管理', icon: Wallet },
   { href: '/liquidity-ratings', label: '流动性评级管理', icon: Settings },
+  { href: '/asset-owners', label: '资产拥有人管理', icon: Users },
+  { href: '/settings/backup-import', label: '备份与导入', icon: Database },
 ]
 
 export default function Sidebar() {

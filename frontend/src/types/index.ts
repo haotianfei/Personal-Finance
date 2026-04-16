@@ -28,6 +28,8 @@ export interface AssetRecord {
   asset_name: string
   account_id: number
   account_name: string | null
+  owner_id: number | null
+  owner_name: string | null
   amount: string
   import_batch_id: number | null
   created_at: string
@@ -40,6 +42,7 @@ export interface AssetRecordCreate {
   fund_type_id: number
   asset_name: string
   account_id: number
+  owner_id?: number
   amount: string
 }
 
@@ -355,4 +358,69 @@ export interface ImportBackup {
   path: string
   size: number
   created_at: string
+}
+
+// --- Asset Owners ---
+export interface AssetOwner {
+  id: number
+  name: string
+  description: string | null
+  created_at: string
+  updated_at: string
+}
+
+// --- Data Export ---
+export interface ExportFile {
+  filename: string
+  file_size: number
+  size?: number  // 兼容旧格式
+  created_at: string
+}
+
+export interface ExportResponse {
+  files: ExportFile[]
+  message: string
+}
+
+// --- Data Import ---
+export interface TableInfo {
+  name: string
+  row_count: number
+  columns: string[]
+}
+
+export interface StructureDifference {
+  added_columns: string[]
+  removed_columns: string[]
+  type_mismatches: {
+    column: string
+    source_type: string
+    target_type: string
+  }[]
+}
+
+export interface ImportAnalysisResponse {
+  tables: TableInfo[]
+  structure_diffs: Record<string, StructureDifference>
+  temp_path: string
+}
+
+export interface ImportPreviewResponse {
+  sample_data: any[]
+  total_count: number
+  conflict_count: number
+}
+
+export interface ImportResult {
+  success: boolean
+  imported_count: number
+  skipped_count: number
+  overwritten_count: number
+  error_count: number
+  message: string
+  details?: Record<string, {
+    imported: number
+    skipped: number
+    errors: number
+  }>
 }
