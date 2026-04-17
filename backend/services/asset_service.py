@@ -9,15 +9,35 @@ from schemas import AssetRecordCreate, AssetRecordOut, AssetRecordTemplate
 from services.period_service import get_period_start_end, get_previous_period_end
 
 
+def parse_id_list(id_str: str | None) -> list[int] | None:
+    """解析逗号分隔的 ID 字符串为整数列表
+    
+    Args:
+        id_str: 逗号分隔的 ID 字符串，如 "1,2,3"
+        
+    Returns:
+        整数列表或 None
+    """
+    if not id_str:
+        return None
+    try:
+        return [int(x.strip()) for x in id_str.split(',') if x.strip()]
+    except ValueError:
+        return None
+
+
 def list_records(
     db: Session,
     asset_date: date | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
-    fund_type_id: int | None = None,
-    account_id: int | None = None,
-    owner_id: int | None = None,
+    fund_type_id: str | None = None,
+    account_id: str | None = None,
+    owner_id: str | None = None,
+    liquidity_rating_id: str | None = None,
     asset_name: str | None = None,
+    amount_min: float | None = None,
+    amount_max: float | None = None,
     period_type: str | None = None,
     year: int | None = None,
     quarter: int | None = None,
@@ -58,14 +78,45 @@ def list_records(
         q = q.where(AssetRecord.asset_date >= date_from)
     if date_to:
         q = q.where(AssetRecord.asset_date <= date_to)
-    if fund_type_id:
-        q = q.where(AssetRecord.fund_type_id == fund_type_id)
-    if account_id:
-        q = q.where(AssetRecord.account_id == account_id)
-    if owner_id:
-        q = q.where(AssetRecord.owner_id == owner_id)
+
+    # 处理多值筛选
+    fund_type_ids = parse_id_list(fund_type_id)
+    if fund_type_ids:
+        if len(fund_type_ids) == 1:
+            q = q.where(AssetRecord.fund_type_id == fund_type_ids[0])
+        else:
+            q = q.where(AssetRecord.fund_type_id.in_(fund_type_ids))
+
+    account_ids = parse_id_list(account_id)
+    if account_ids:
+        if len(account_ids) == 1:
+            q = q.where(AssetRecord.account_id == account_ids[0])
+        else:
+            q = q.where(AssetRecord.account_id.in_(account_ids))
+
+    owner_ids = parse_id_list(owner_id)
+    if owner_ids:
+        if len(owner_ids) == 1:
+            q = q.where(AssetRecord.owner_id == owner_ids[0])
+        else:
+            q = q.where(AssetRecord.owner_id.in_(owner_ids))
+
+    # 处理流动性评级筛选
+    liquidity_rating_ids = parse_id_list(liquidity_rating_id)
+    if liquidity_rating_ids:
+        if len(liquidity_rating_ids) == 1:
+            q = q.where(AssetRecord.liquidity_rating_id == liquidity_rating_ids[0])
+        else:
+            q = q.where(AssetRecord.liquidity_rating_id.in_(liquidity_rating_ids))
+
     if asset_name:
         q = q.where(AssetRecord.asset_name.contains(asset_name))
+
+    # 处理金额区间筛选
+    if amount_min is not None:
+        q = q.where(AssetRecord.amount >= amount_min)
+    if amount_max is not None:
+        q = q.where(AssetRecord.amount <= amount_max)
 
     count_q = select(func.count()).select_from(q.subquery())
     total = db.execute(count_q).scalar() or 0

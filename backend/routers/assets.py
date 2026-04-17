@@ -21,10 +21,13 @@ def list_assets(
     asset_date: Optional[date] = None,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
-    fund_type_id: Optional[int] = None,
-    account_id: Optional[int] = None,
-    owner_id: Optional[int] = None,
+    fund_type_id: Optional[str] = None,
+    account_id: Optional[str] = None,
+    owner_id: Optional[str] = None,
+    liquidity_rating_id: Optional[str] = None,
     asset_name: Optional[str] = None,
+    amount_min: Optional[float] = None,
+    amount_max: Optional[float] = None,
     period_type: Optional[str] = None,
     year: Optional[int] = None,
     quarter: Optional[int] = None,
@@ -35,8 +38,8 @@ def list_assets(
     db: Session = Depends(get_db),
 ):
     records, total = asset_service.list_records(
-        db, asset_date, date_from, date_to, fund_type_id, account_id, owner_id, asset_name,
-        period_type, year, quarter, month, day, page, page_size
+        db, asset_date, date_from, date_to, fund_type_id, account_id, owner_id, liquidity_rating_id, asset_name,
+        amount_min, amount_max, period_type, year, quarter, month, day, page, page_size
     )
     items = [asset_service.record_to_out(r) for r in records]
     total_pages = (total + page_size - 1) // page_size
