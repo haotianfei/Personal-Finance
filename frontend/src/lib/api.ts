@@ -217,7 +217,7 @@ export const api = {
 
   // Data Export
   listExports: () => request<{ total: number; files: import('@/types').ExportFile[] }>('/exports'),
-  exportTables: (tables: string[], format: 'json' | 'csv') =>
+  exportTables: (tables: string[], format: 'json' | 'csv' | 'db') =>
     request<import('@/types').ExportResponse>('/exports/tables', {
       method: 'POST',
       body: JSON.stringify({ tables, format }),

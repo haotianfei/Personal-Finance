@@ -105,6 +105,7 @@ class DbAnalyzeResponse(BaseModel):
     missing_tables: list[str]
     structure_differences: dict
     table_row_counts: dict
+    temp_file_id: str
 
 
 class DbPreviewRequest(BaseModel):

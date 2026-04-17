@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { api } from '@/lib/api'
 import { formatAmount, formatPercent } from '@/lib/utils'
 import { TrendingUp, TrendingDown, Wallet, PiggyBank, CreditCard, Calendar } from 'lucide-react'
@@ -45,10 +45,19 @@ function StatCard({ title, value, icon: Icon, change, changePercent, color }: {
 
 export default function DashboardPage() {
   const { data: summary } = useQuery({ queryKey: ['summary'], queryFn: api.getSummary })
-  const { data: mixedChartData } = useQuery({
-    queryKey: ['mixedChart', 'month'],
-    queryFn: () => api.getMixedChart({ period_type: 'month' }),
+  const { data: rawMixedChartData } = useQuery({
+    queryKey: ['mixedChart', 'year'],
+    queryFn: () => api.getMixedChart({ period_type: 'year' }),
   })
+
+  // 限制最多取最近50条年度数据 - 使用 useMemo 缓存处理后的数据
+  const mixedChartData = useMemo(() => {
+    if (!rawMixedChartData) return null
+    return {
+      trend: rawMixedChartData.trend.slice(-50),
+      comparison: rawMixedChartData.comparison.slice(-50),
+    }
+  }, [rawMixedChartData])
   const { data: proportionData } = useQuery({
     queryKey: ['proportion', 'fund_type', summary?.latest_date],
     queryFn: () => api.getProportionByDimension('fund_type', summary!.latest_date!),
@@ -65,8 +74,16 @@ export default function DashboardPage() {
   }, [])
   
   const isSmallScreen = windowWidth < 768
-  
-  const trendOption = mixedChartData ? {
+
+  // 使用 useMemo 缓存趋势图配置，避免重复计算
+  const trendOption = useMemo(() => {
+    if (!mixedChartData) return {}
+
+    // 大数据量时使用降采样策略
+    const dataLength = mixedChartData.trend.length
+    const sampling = dataLength > 100 ? 'lttb' : undefined
+
+    return {
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'cross' },
@@ -96,11 +113,11 @@ export default function DashboardPage() {
     xAxis: {
       type: 'category',
       data: mixedChartData.trend.map((t: { period: string }) => t.period),
-      axisLabel: { 
-        fontSize: isSmallScreen ? 9 : 10, 
+      axisLabel: {
+        fontSize: isSmallScreen ? 9 : 10,
         color: '#94a3b8',
-        rotate: isSmallScreen ? 45 : 30,
-        interval: isSmallScreen ? 'auto' : 0,
+        rotate: isSmallScreen ? 30 : 0,
+        interval: 'auto',
       },
       axisLine: { lineStyle: { color: '#e2e8f0' } },
     },
@@ -135,6 +152,7 @@ export default function DashboardPage() {
         lineStyle: { width: isSmallScreen ? 2 : 2.5, color: '#3b82f6' },
         itemStyle: { color: '#3b82f6' },
         symbolSize: isSmallScreen ? 4 : 6,
+        sampling,
         areaStyle: {
           color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
             colorStops: [
@@ -155,65 +173,74 @@ export default function DashboardPage() {
         barMaxWidth: isSmallScreen ? 15 : 20,
       },
     ],
-  } : {}
+    }
+  }, [mixedChartData, isSmallScreen])
 
-  const assetTreemapOption = proportionData?.asset_items?.length ? {
-    tooltip: {
-      formatter: (p: { name: string; value: number; data: { percent: number } }) =>
-        `${p.name}<br/>¥${Number(p.value).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}<br/>占比: ${p.data?.percent || 0}%`,
-    },
-    series: [{
-      type: 'treemap',
-      width: '100%',
-      height: '100%',
-      roam: false,
-      nodeClick: false,
-      breadcrumb: { show: false },
-      label: {
-        show: true,
-        formatter: '{b}',
-        fontSize: 14,
+  // 使用 useMemo 缓存资产分布图配置
+  const assetTreemapOption = useMemo(() => {
+    if (!proportionData?.asset_items?.length) return {}
+    return {
+      tooltip: {
+        formatter: (p: { name: string; value: number; data: { percent: number } }) =>
+          `${p.name}<br/>¥${Number(p.value).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}<br/>占比: ${p.data?.percent || 0}%`,
       },
-      itemStyle: {
-        borderColor: '#fff',
-        borderWidth: 2,
-      },
-      data: proportionData.asset_items.map((item) => ({
-        name: item.name,
-        value: parseFloat(item.amount),
-        percent: item.percent,
-      })),
-    }],
-  } : {}
+      series: [{
+        type: 'treemap',
+        width: '100%',
+        height: '100%',
+        roam: false,
+        nodeClick: false,
+        breadcrumb: { show: false },
+        label: {
+          show: true,
+          formatter: '{b}',
+          fontSize: 14,
+        },
+        itemStyle: {
+          borderColor: '#fff',
+          borderWidth: 2,
+        },
+        data: proportionData.asset_items.map((item) => ({
+          name: item.name,
+          value: parseFloat(item.amount),
+          percent: item.percent,
+        })),
+      }],
+    }
+  }, [proportionData])
 
-  const liabilityTreemapOption = proportionData?.liability_items?.length ? {
-    tooltip: {
-      formatter: (p: { name: string; value: number; data: { percent: number } }) =>
-        `${p.name}<br/>¥${Number(p.value).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}<br/>占比: ${p.data?.percent || 0}%`,
-    },
-    series: [{
-      type: 'treemap',
-      width: '100%',
-      height: '100%',
-      roam: false,
-      nodeClick: false,
-      breadcrumb: { show: false },
-      label: {
-        show: true,
-        formatter: '{b}',
-        fontSize: 14,
+  // 使用 useMemo 缓存负债分布图配置
+  const liabilityTreemapOption = useMemo(() => {
+    if (!proportionData?.liability_items?.length) return {}
+    return {
+      tooltip: {
+        formatter: (p: { name: string; value: number; data: { percent: number } }) =>
+          `${p.name}<br/>¥${Number(p.value).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}<br/>占比: ${p.data?.percent || 0}%`,
       },
-      itemStyle: {
-        borderColor: '#fff',
-        borderWidth: 2,
-      },
-      data: proportionData.liability_items.map((item) => ({
-        name: item.name,
-        value: parseFloat(item.amount),
-        percent: item.percent,
-      })),
-    }],
-  } : {}
+      series: [{
+        type: 'treemap',
+        width: '100%',
+        height: '100%',
+        roam: false,
+        nodeClick: false,
+        breadcrumb: { show: false },
+        label: {
+          show: true,
+          formatter: '{b}',
+          fontSize: 14,
+        },
+        itemStyle: {
+          borderColor: '#fff',
+          borderWidth: 2,
+        },
+        data: proportionData.liability_items.map((item) => ({
+          name: item.name,
+          value: parseFloat(item.amount),
+          percent: item.percent,
+        })),
+      }],
+    }
+  }, [proportionData])
 
   return (
     <div className="space-y-6 animate-fade-in">

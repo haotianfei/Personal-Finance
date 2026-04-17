@@ -15,7 +15,8 @@ router = APIRouter()
 
 # 支持的表名列表
 SUPPORTED_TABLES = ["accounts", "fund_types", "liquidity_ratings", "asset_owners",
-                   "alert_rules", "allocation_targets", "asset_records"]
+                   "alert_rules", "allocation_targets", "asset_records",
+                   "auto_export_rules", "export_history"]
 
 
 class TableExportRequest(BaseModel):
@@ -68,10 +69,10 @@ def export_tables(
         )
 
     # 验证格式
-    if request.format not in ["json", "csv"]:
+    if request.format not in ["json", "csv", "db"]:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid format: {request.format}. Supported: json, csv"
+            detail=f"Invalid format: {request.format}. Supported: json, csv, db"
         )
 
     prefix = request.filename_prefix or "export"
@@ -81,6 +82,31 @@ def export_tables(
         if request.format == "json":
             # 导出为单个JSON文件
             filepath = export_service.export_tables_to_json(
+                db, request.tables, filename_prefix=prefix
+            )
+            filename = os.path.basename(filepath)
+            file_size = os.path.getsize(filepath)
+
+            # 记录导出历史
+            history = ExportHistory(
+                export_type="manual",
+                filename=filename,
+                file_size=file_size,
+                operator=operator,
+                rule_name=None,
+                file_path=filepath,
+            )
+            db.add(history)
+            db.commit()
+
+            exported_files.append({
+                "filename": filename,
+                "file_path": filepath,
+                "file_size": file_size,
+            })
+        elif request.format == "db":
+            # 导出为SQLite数据库文件
+            filepath = export_service.export_tables_to_sqlite(
                 db, request.tables, filename_prefix=prefix
             )
             filename = os.path.basename(filepath)
@@ -260,6 +286,8 @@ def get_supported_tables():
             "alert_rules": "预警规则",
             "allocation_targets": "配置目标",
             "asset_records": "资产记录",
+            "auto_export_rules": "自动导出规则",
+            "export_history": "导出历史",
         }
     }
 

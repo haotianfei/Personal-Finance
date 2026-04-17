@@ -78,6 +78,16 @@ interface ImportPreview {
   conflict_count: number
 }
 
+interface TableImportResultItem {
+  table_name: string
+  total_rows: number
+  imported_rows: number
+  skipped_rows: number
+  overwritten_rows: number
+  merged_rows: number
+  errors: string[]
+}
+
 interface ImportResult {
   success: boolean
   imported_count: number
@@ -85,6 +95,14 @@ interface ImportResult {
   overwritten_count: number
   error_count: number
   message: string
+  results?: TableImportResultItem[]
+  // 单表导入返回的字段
+  table_name?: string
+  total_rows?: number
+  imported_rows?: number
+  skipped_rows?: number
+  overwritten_rows?: number
+  errors?: string[]
 }
 
 export default function BackupImportPage() {
@@ -93,7 +111,7 @@ export default function BackupImportPage() {
   
   // 导出相关状态
   const [selectedTables, setSelectedTables] = useState<string[]>([])
-  const [exportFormat, setExportFormat] = useState<'json' | 'csv'>('json')
+  const [exportFormat, setExportFormat] = useState<'json' | 'csv' | 'db'>('json')
   
   // 导入相关状态
   const [tempFileId, setTempFileId] = useState<string>('')
@@ -167,7 +185,7 @@ export default function BackupImportPage() {
     },
     onSuccess: (data) => {
       setPreviewData(data)
-      setCurrentStep(2)
+      setCurrentStep(3)
       message.success('预览数据加载完成')
     },
     onError: () => {
@@ -177,14 +195,41 @@ export default function BackupImportPage() {
 
   // 执行导入
   const importMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       if (fileType === 'csv' || fileType === 'json') {
-        // CSV/JSON 文件一次只能导入一个表
-        return api.executeDataFileImport(
-          tempFileId,
-          selectedImportTables[0],
-          conflictStrategy
-        )
+        // CSV/JSON 文件支持多表导入，循环导入每个选中的表
+        const results: ImportResult[] = []
+        for (const tableName of selectedImportTables) {
+          const result = await api.executeDataFileImport(
+            tempFileId,
+            tableName,
+            conflictStrategy
+          )
+          results.push(result)
+        }
+        // 合并所有导入结果
+        const totalImported = results.reduce((sum, r) => sum + (r.imported_count || 0), 0)
+        const totalSkipped = results.reduce((sum, r) => sum + (r.skipped_count || 0), 0)
+        const totalOverwritten = results.reduce((sum, r) => sum + (r.overwritten_count || 0), 0)
+        const totalErrors = results.reduce((sum, r) => sum + (r.error_count || 0), 0)
+        const allResults: TableImportResultItem[] = results.flatMap(r => r.results || [{
+          table_name: r.table_name || '',
+          total_rows: r.total_rows || 0,
+          imported_rows: r.imported_rows || 0,
+          skipped_rows: r.skipped_rows || 0,
+          overwritten_rows: r.overwritten_rows || 0,
+          merged_rows: 0,
+          errors: r.errors || []
+        }])
+        return {
+          success: totalErrors === 0,
+          imported_count: totalImported,
+          skipped_count: totalSkipped,
+          overwritten_count: totalOverwritten,
+          error_count: totalErrors,
+          message: `导入完成：新导入 ${totalImported} 条，覆盖 ${totalOverwritten} 条，跳过 ${totalSkipped} 条`,
+          results: allResults
+        }
       }
       return api.executeImport(
         tempFileId,
@@ -241,33 +286,61 @@ export default function BackupImportPage() {
             >
               <Option value="json">JSON（包含结构）</Option>
               <Option value="csv">CSV（仅数据）</Option>
+              <Option value="db">SQLite数据库（.db）</Option>
             </Select>
           </div>
           
           <div>
             <Text strong>选择要导出的表：</Text>
             <div style={{ marginTop: 16 }}>
-              <Row gutter={[16, 8]}>
-                {SUPPORTED_TABLES.map((table) => (
-                  <Col span={8} key={table.key}>
-                    <Checkbox
-                      checked={selectedTables.includes(table.key)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedTables([...selectedTables, table.key])
-                        } else {
-                          setSelectedTables(selectedTables.filter(t => t !== table.key))
-                        }
-                      }}
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Row gutter={[16, 8]} align="middle">
+                  <Col>
+                    <Button
+                      type="primary"
+                      size="small"
+                      onClick={() => setSelectedTables(SUPPORTED_TABLES.map(t => t.key))}
                     >
-                      {table.label}
-                      <Tag color={table.category === 'config' ? 'blue' : 'green'} style={{ marginLeft: 8 }}>
-                        {table.category === 'config' ? '配置' : '数据'}
-                      </Tag>
-                    </Checkbox>
+                      全部备份
+                    </Button>
                   </Col>
-                ))}
-              </Row>
+                  <Col>
+                    <Button
+                      size="small"
+                      onClick={() => setSelectedTables([])}
+                      disabled={selectedTables.length === 0}
+                    >
+                      取消全选
+                    </Button>
+                  </Col>
+                  <Col>
+                    <Text type="secondary">
+                      已选择 {selectedTables.length}/{SUPPORTED_TABLES.length} 个表
+                    </Text>
+                  </Col>
+                </Row>
+                <Row gutter={[16, 8]}>
+                  {SUPPORTED_TABLES.map((table) => (
+                    <Col span={8} key={table.key}>
+                      <Checkbox
+                        checked={selectedTables.includes(table.key)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedTables([...selectedTables, table.key])
+                          } else {
+                            setSelectedTables(selectedTables.filter(t => t !== table.key))
+                          }
+                        }}
+                      >
+                        {table.label}
+                        <Tag color={table.category === 'config' ? 'blue' : 'green'} style={{ marginLeft: 8 }}>
+                          {table.category === 'config' ? '配置' : '数据'}
+                        </Tag>
+                      </Checkbox>
+                    </Col>
+                  ))}
+                </Row>
+              </Space>
             </div>
           </div>
           
@@ -319,13 +392,29 @@ export default function BackupImportPage() {
       { title: '执行导入', description: '完成数据迁移' },
     ]
 
+    // 判断步骤是否可以点击（只能回退到已完成的步骤）
+    const canClickStep = (stepIndex: number) => {
+      // 步骤0始终可点击
+      if (stepIndex === 0) return true
+      // 步骤1需要有分析结果
+      if (stepIndex === 1) return analysisResult !== null
+      // 步骤2需要有分析结果
+      if (stepIndex === 2) return analysisResult !== null
+      // 步骤3需要有预览数据
+      if (stepIndex === 3) return Object.keys(previewData).length > 0
+      // 步骤4需要有导入结果
+      if (stepIndex === 4) return importResult !== null
+      return false
+    }
+
     return (
       <div style={{ marginBottom: 24 }}>
         <Steps
           current={currentStep}
-          items={steps.map((step) => ({
+          items={steps.map((step, index) => ({
             title: step.title,
             description: step.description,
+            onClick: canClickStep(index) ? () => setCurrentStep(index) : undefined,
           }))}
         />
       </div>
@@ -380,8 +469,56 @@ export default function BackupImportPage() {
         <Card title="数据库分析结果" bordered={false}>
           <Alert
             message="分析完成"
-            description={`检测到 ${analysisResult.tables.length} 个表，请选择要导入的表`}
+            description={`检测到 ${analysisResult.tables.length} 个表`}
             type="success"
+            showIcon
+            style={{ marginBottom: 16 }}
+          />
+          
+          <Table
+            dataSource={analysisResult.tables}
+            rowKey="name"
+            columns={[
+              { title: '表名', dataIndex: 'name' },
+              { title: '记录数', dataIndex: 'row_count' },
+              { title: '字段', dataIndex: 'columns', render: (cols: string[]) => cols.join(', ') },
+              {
+                title: '结构差异',
+                render: (_, record: TableInfo) => {
+                  const diff = analysisResult?.structure_diffs?.[record.name]
+                  if (!diff) return <Tag>无差异</Tag>
+                  return (
+                    <Space>
+                      {diff.new_columns?.length > 0 && (
+                        <Tag color="green">+{diff.new_columns.length} 字段</Tag>
+                      )}
+                      {diff.missing_columns?.length > 0 && (
+                        <Tag color="red">-{diff.missing_columns.length} 字段</Tag>
+                      )}
+                    </Space>
+                  )
+                },
+              },
+            ]}
+          />
+          
+          <Button
+            type="primary"
+            onClick={() => setCurrentStep(2)}
+            style={{ marginTop: 16 }}
+          >
+            下一步：选择表
+          </Button>
+        </Card>
+      )}
+
+      {/* 步骤 2: 选择表 */}
+      {currentStep === 2 && analysisResult && (
+        <Card title="选择要导入的表" bordered={false}>
+          <Alert
+            message="请选择表"
+            description={`检测到 ${analysisResult.tables.length} 个表，请选择要导入的表`}
+            type="info"
             showIcon
             style={{ marginBottom: 16 }}
           />
@@ -399,23 +536,6 @@ export default function BackupImportPage() {
               { title: '表名', dataIndex: 'name' },
               { title: '记录数', dataIndex: 'row_count' },
               { title: '字段', dataIndex: 'columns', render: (cols: string[]) => cols.join(', ') },
-              {
-                title: '结构差异',
-                render: (_, record: TableInfo) => {
-                  const diff = analysisResult.structure_diffs[record.name]
-                  if (!diff) return <Tag>无差异</Tag>
-                  return (
-                    <Space>
-                      {diff.new_columns.length > 0 && (
-                        <Tag color="green">+{diff.new_columns.length} 字段</Tag>
-                      )}
-                      {diff.missing_columns.length > 0 && (
-                        <Tag color="red">-{diff.missing_columns.length} 字段</Tag>
-                      )}
-                    </Space>
-                  )
-                },
-              },
             ]}
           />
           
@@ -431,8 +551,8 @@ export default function BackupImportPage() {
         </Card>
       )}
 
-      {/* 步骤 2: 预览数据 */}
-      {currentStep === 2 && Object.keys(previewData).length > 0 && (
+      {/* 步骤 3: 预览数据 */}
+      {currentStep === 3 && Object.keys(previewData).length > 0 && (
         <Card title="数据预览" bordered={false}>
           <Alert
             message="数据预览"
@@ -516,7 +636,7 @@ export default function BackupImportPage() {
             description={importResult.message}
             style={{ marginBottom: 16 }}
           />
-          
+
           <Row gutter={16}>
             <Col span={6}>
               <Card>
@@ -559,7 +679,38 @@ export default function BackupImportPage() {
               </Card>
             </Col>
           </Row>
-          
+
+          {/* 各表详细导入结果 */}
+          {importResult.results && importResult.results.length > 0 && (
+            <Card title="各表导入详情" size="small" style={{ marginTop: 16, marginBottom: 16 }}>
+              <Table
+                dataSource={importResult.results}
+                rowKey="table_name"
+                pagination={false}
+                size="small"
+                columns={[
+                  { title: '表名', dataIndex: 'table_name', key: 'table_name' },
+                  { title: '总记录数', dataIndex: 'total_rows', key: 'total_rows' },
+                  { title: '新导入', dataIndex: 'imported_rows', key: 'imported_rows' },
+                  { title: '跳过', dataIndex: 'skipped_rows', key: 'skipped_rows' },
+                  { title: '覆盖', dataIndex: 'overwritten_rows', key: 'overwritten_rows' },
+                  { title: '合并', dataIndex: 'merged_rows', key: 'merged_rows' },
+                  {
+                    title: '状态',
+                    key: 'status',
+                    render: (_, record: TableImportResultItem) => (
+                      record.errors && record.errors.length > 0 ? (
+                        <Tag color="error">有错误</Tag>
+                      ) : (
+                        <Tag color="success">成功</Tag>
+                      )
+                    )
+                  }
+                ]}
+              />
+            </Card>
+          )}
+
           <Button
             type="primary"
             onClick={() => {

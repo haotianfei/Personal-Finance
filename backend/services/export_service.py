@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import logging
 import os
 import shutil
 from datetime import date, datetime
@@ -12,8 +13,11 @@ from sqlalchemy import select, and_, inspect
 
 from models import (
     AssetRecord, FundType, Account, LiquidityRating,
-    AssetOwner, AlertRule, AllocationTarget, ExportHistory
+    AssetOwner, AlertRule, AllocationTarget, ExportHistory, AutoExportRule
 )
+
+# 配置日志
+logger = logging.getLogger(__name__)
 
 
 # 导出目录配置
@@ -31,6 +35,8 @@ TABLE_MAP = {
     "alert_rules": AlertRule,
     "allocation_targets": AllocationTarget,
     "asset_records": AssetRecord,
+    "auto_export_rules": AutoExportRule,
+    "export_history": ExportHistory,
 }
 
 
@@ -217,29 +223,38 @@ def export_table_to_json(
 
     Args:
         db: 数据库会话
-        table_name: 表名 (accounts, fund_types, liquidity_ratings, asset_owners, alert_rules, allocation_targets, asset_records)
+        table_name: 表名 (accounts, fund_types, liquidity_ratings, asset_owners, alert_rules, allocation_targets, asset_records, auto_export_rules, export_history)
         include_schema: 是否包含schema信息
 
     Returns:
         包含schema和数据的字典
     """
+    logger.info(f"Exporting table '{table_name}' to JSON")
+
     if table_name not in TABLE_MAP:
+        logger.error(f"Unknown table: {table_name}. Supported tables: {list(TABLE_MAP.keys())}")
         raise ValueError(f"Unknown table: {table_name}. Supported tables: {list(TABLE_MAP.keys())}")
 
     model_class = TABLE_MAP[table_name]
 
-    # 获取schema
-    result = {}
-    if include_schema:
-        result["schema"] = _get_table_schema(model_class)
+    try:
+        # 获取schema
+        result = {}
+        if include_schema:
+            result["schema"] = _get_table_schema(model_class)
 
-    # 获取数据
-    records = db.execute(select(model_class)).scalars().all()
-    result["data"] = [_model_to_dict(r) for r in records]
-    result["count"] = len(result["data"])
-    result["exported_at"] = datetime.now().isoformat()
+        # 获取数据
+        records = db.execute(select(model_class)).scalars().all()
+        result["data"] = [_model_to_dict(r) for r in records]
+        result["count"] = len(result["data"])
+        result["exported_at"] = datetime.now().isoformat()
 
-    return result
+        logger.info(f"Successfully exported {result['count']} records from '{table_name}'")
+        return result
+
+    except Exception as e:
+        logger.error(f"Failed to export table '{table_name}': {str(e)}")
+        raise
 
 
 def export_table_to_csv(
@@ -299,24 +314,38 @@ def export_tables_to_json(
     Returns:
         生成的文件路径
     """
+    logger.info(f"Exporting tables to JSON: {table_names}")
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{filename_prefix}_{timestamp}.json"
     filepath = os.path.join(EXPORTS_DIR, filename)
 
-    export_data = {
-        "exported_at": datetime.now().isoformat(),
-        "tables": {}
-    }
+    try:
+        export_data = {
+            "exported_at": datetime.now().isoformat(),
+            "tables": {}
+        }
 
-    for table_name in table_names:
-        if table_name in TABLE_MAP:
-            export_data["tables"][table_name] = export_table_to_json(db, table_name, include_schema=True)
+        for table_name in table_names:
+            if table_name in TABLE_MAP:
+                try:
+                    export_data["tables"][table_name] = export_table_to_json(db, table_name, include_schema=True)
+                except Exception as e:
+                    logger.error(f"Failed to export table '{table_name}': {str(e)}")
+                    raise
+            else:
+                logger.warning(f"Skipping unknown table: {table_name}")
 
-    # 写入文件
-    with open(filepath, 'w', encoding='utf-8') as f:
-        json.dump(export_data, f, ensure_ascii=False, indent=2)
+        # 写入文件
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(export_data, f, ensure_ascii=False, indent=2)
 
-    return filepath
+        logger.info(f"Successfully exported to: {filepath}")
+        return filepath
+
+    except Exception as e:
+        logger.error(f"Failed to export tables to JSON: {str(e)}")
+        raise
 
 
 def export_tables_to_csv(
@@ -382,6 +411,99 @@ def create_full_backup(db: Session) -> str:
         json.dump(export_data, f, ensure_ascii=False, indent=2)
 
     return filepath
+
+
+def export_tables_to_sqlite(db: Session, tables: List[str], filename_prefix: str = "export") -> str:
+    """导出指定表到 SQLite 数据库文件
+
+    Args:
+        db: 数据库会话
+        tables: 要导出的表名列表
+        filename_prefix: 文件名前缀
+
+    Returns:
+        导出文件路径
+    """
+    import sqlite3
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{filename_prefix}_{timestamp}.db"
+    filepath = os.path.join(EXPORTS_DIR, filename)
+
+    # 创建新的 SQLite 数据库
+    conn = sqlite3.connect(filepath)
+    cursor = conn.cursor()
+
+    try:
+        for table_name in tables:
+            if table_name not in TABLE_MAP:
+                continue
+
+            model_class = TABLE_MAP[table_name]
+
+            # 获取表结构
+            inspector = inspect(db.bind)
+            columns_info = inspector.get_columns(table_name)
+
+            # 创建表
+            column_defs = []
+            for col in columns_info:
+                col_name = col['name']
+                col_type = str(col['type'])
+                # 简化类型映射
+                if 'INTEGER' in col_type.upper() or 'INT' in col_type.upper():
+                    sql_type = 'INTEGER'
+                elif 'FLOAT' in col_type.upper() or 'REAL' in col_type.upper() or 'NUMERIC' in col_type.upper() or 'DECIMAL' in col_type.upper():
+                    sql_type = 'REAL'
+                elif 'BLOB' in col_type.upper():
+                    sql_type = 'BLOB'
+                else:
+                    sql_type = 'TEXT'
+
+                nullable = '' if col.get('nullable', True) else ' NOT NULL'
+                default = f" DEFAULT {col['default']}" if col.get('default') is not None else ''
+                column_defs.append(f"{col_name} {sql_type}{nullable}{default}")
+
+            create_sql = f"CREATE TABLE {table_name} ({', '.join(column_defs)})"
+            cursor.execute(create_sql)
+
+            # 获取数据
+            records = db.query(model_class).all()
+
+            # 插入数据
+            if records:
+                # 获取列名
+                col_names = [col['name'] for col in columns_info]
+                placeholders = ', '.join(['?' for _ in col_names])
+                insert_sql = f"INSERT INTO {table_name} ({', '.join(col_names)}) VALUES ({placeholders})"
+
+                for record in records:
+                    row_data = []
+                    for col in columns_info:
+                        col_name = col['name']
+                        value = getattr(record, col_name, None)
+                        # 处理特殊类型
+                        if isinstance(value, datetime):
+                            value = value.isoformat()
+                        elif isinstance(value, date):
+                            value = value.isoformat()
+                        elif isinstance(value, Decimal):
+                            value = float(value)
+                        row_data.append(value)
+                    cursor.execute(insert_sql, row_data)
+
+        conn.commit()
+        logger.info(f"Exported {len(tables)} tables to SQLite: {filepath}")
+        return filepath
+
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Failed to export to SQLite: {str(e)}")
+        raise
+    finally:
+        conn.close()
 
 
 def list_export_files() -> List[Dict[str, Any]]:

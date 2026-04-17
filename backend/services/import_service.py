@@ -1262,7 +1262,18 @@ def import_csv_data_file(file_path: str, db: Session, table_name: str, conflict_
         "imported_rows": imported,
         "skipped_rows": skipped,
         "overwritten_rows": overwritten,
-        "errors": errors[:10]  # 只返回前10个错误
+        "errors": errors[:10],  # 只返回前10个错误
+        "results": [
+            {
+                "table_name": table_name,
+                "total_rows": len(rows),
+                "imported_rows": imported,
+                "skipped_rows": skipped,
+                "overwritten_rows": overwritten,
+                "merged_rows": 0,
+                "errors": errors[:10]
+            }
+        ]
     }
 
 
@@ -1335,7 +1346,18 @@ def import_json_data_file(file_path: str, db: Session, table_name: str, conflict
         "imported_rows": imported,
         "skipped_rows": skipped,
         "overwritten_rows": overwritten,
-        "errors": errors[:10]
+        "errors": errors[:10],
+        "results": [
+            {
+                "table_name": table_name,
+                "total_rows": len(rows),
+                "imported_rows": imported,
+                "skipped_rows": skipped,
+                "overwritten_rows": overwritten,
+                "merged_rows": 0,
+                "errors": errors[:10]
+            }
+        ]
     }
 
 
@@ -1350,6 +1372,8 @@ def _import_asset_record_row(db: Session, row: Dict, conflict_strategy: str) -> 
     Returns:
         处理结果: imported/skipped/overwritten
     """
+    from datetime import datetime
+
     # 检查是否存在冲突 - 支持 date 和 asset_date 两种字段名
     date_value = row.get("date") or row.get("asset_date")
     existing = db.query(AssetRecord).filter(
@@ -1364,6 +1388,18 @@ def _import_asset_record_row(db: Session, row: Dict, conflict_strategy: str) -> 
             # 更新现有记录
             for key, value in row.items():
                 if hasattr(existing, key) and key != "id":
+                    # 转换日期字符串为 date 对象
+                    if key in ["asset_date", "date"] and isinstance(value, str):
+                        try:
+                            value = datetime.strptime(value, "%Y-%m-%d").date()
+                        except ValueError:
+                            pass
+                    # 转换 datetime 字符串为 datetime 对象
+                    if key in ["created_at", "updated_at"] and isinstance(value, str):
+                        try:
+                            value = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                        except ValueError:
+                            pass
                     setattr(existing, key, value)
             return "overwritten"
         elif conflict_strategy == "merge":
@@ -1375,8 +1411,21 @@ def _import_asset_record_row(db: Session, row: Dict, conflict_strategy: str) -> 
                     pass
             return "overwritten"
 
-    # 创建新记录
+    # 创建新记录 - 转换日期字段
     record_data = {k: v for k, v in row.items() if k != "id"}
+    # 转换 asset_date
+    if "asset_date" in record_data and isinstance(record_data["asset_date"], str):
+        try:
+            record_data["asset_date"] = datetime.strptime(record_data["asset_date"], "%Y-%m-%d").date()
+        except ValueError:
+            pass
+    # 转换 created_at 和 updated_at
+    for dt_field in ["created_at", "updated_at"]:
+        if dt_field in record_data and isinstance(record_data[dt_field], str):
+            try:
+                record_data[dt_field] = datetime.fromisoformat(record_data[dt_field].replace('Z', '+00:00'))
+            except ValueError:
+                pass
     new_record = AssetRecord(**record_data)
     db.add(new_record)
     return "imported"

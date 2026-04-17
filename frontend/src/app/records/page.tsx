@@ -1312,9 +1312,9 @@ export default function RecordsPage() {
     {
       title: '资产类型',
       dataIndex: 'fund_type_name',
-      key: 'fund_type_id',
+      key: 'fund_type_name',
       width: 140,
-      filters: leafTypes.map(ft => ({ text: ft.name, value: ft.id })),
+      sorter: true,
       valueType: 'select',
       fieldProps: {
         options: leafTypes.map(ft => ({ label: ft.name, value: ft.id })),
@@ -1323,13 +1323,14 @@ export default function RecordsPage() {
       search: {
         transform: (value) => ({ fund_type_id: value.join(',') }),
       },
+      render: (_, record) => record.fund_type_name || '-',
     },
     {
       title: '账户',
       dataIndex: 'account_name',
-      key: 'account_id',
+      key: 'account_name',
       width: 140,
-      filters: accounts?.map(a => ({ text: a.name, value: a.id })) || [],
+      sorter: true,
       valueType: 'select',
       fieldProps: {
         options: accounts?.map(a => ({ label: a.name, value: a.id })) || [],
@@ -1338,13 +1339,14 @@ export default function RecordsPage() {
       search: {
         transform: (value) => ({ account_id: value.join(',') }),
       },
+      render: (_, record) => record.account_name || '-',
     },
     {
       title: '流动性评级',
       dataIndex: 'liquidity_rating_name',
-      key: 'liquidity_rating_id',
+      key: 'liquidity_rating_name',
       width: 120,
-      filters: liquidityRatings?.map(lr => ({ text: lr.name, value: lr.id })) || [],
+      sorter: true,
       valueType: 'select',
       fieldProps: {
         options: liquidityRatings?.map(lr => ({ label: lr.name, value: lr.id })) || [],
@@ -1360,9 +1362,9 @@ export default function RecordsPage() {
     {
       title: '资产拥有者',
       dataIndex: 'owner_name',
-      key: 'owner_id',
+      key: 'owner_name',
       width: 120,
-      filters: assetOwners?.map(o => ({ text: o.name, value: o.id })) || [],
+      sorter: true,
       valueType: 'select',
       fieldProps: {
         options: assetOwners?.map(o => ({ label: o.name, value: o.id })) || [],
@@ -1424,6 +1426,17 @@ export default function RecordsPage() {
     },
   ]
 
+  // 排序字段映射：将前端显示的字段名映射到后端排序字段名
+  const sortFieldMapping: Record<string, string> = {
+    'fund_type_name': 'fund_type_name',
+    'account_name': 'account_name',
+    'liquidity_rating_name': 'liquidity_rating_name',
+    'owner_name': 'owner_name',
+    'asset_date': 'asset_date',
+    'asset_name': 'asset_name',
+    'amount': 'amount',
+  }
+
   // Fetch data function for ProTable
   const fetchData = useCallback(async (params: any, sort: any, filter: any) => {
     const queryParams: Record<string, string> = {
@@ -1476,7 +1489,8 @@ export default function RecordsPage() {
     if (sort) {
       const sortField = Object.keys(sort)[0]
       if (sortField) {
-        queryParams.sort_field = sortField
+        // 使用字段映射获取后端排序字段名
+        queryParams.sort_field = sortFieldMapping[sortField] || sortField
         queryParams.sort_order = sort[sortField] === 'ascend' ? 'asc' : 'desc'
       }
     }
@@ -1498,9 +1512,12 @@ export default function RecordsPage() {
     },
   }
 
-  // Get editing record
+  // Store table data for editing
+  const [tableData, setTableData] = useState<AssetRecord[]>([])
+
+  // Get editing record from table data
   const editingRecord = editingId
-    ? (actionRef.current as any)?.pageData?.find((r: AssetRecord) => r.id === editingId)
+    ? tableData.find((r: AssetRecord) => r.id === editingId)
     : null
 
   return (
@@ -1551,6 +1568,7 @@ export default function RecordsPage() {
           defaultPageSize: 10,
         }}
         rowSelection={rowSelection}
+        onDataSourceChange={(data) => setTableData(data)}
         tableAlertRender={({ selectedRowKeys }) => (
           <div className="flex items-center gap-2">
             <span>已选择 <strong>{selectedRowKeys.length}</strong> 条记录</span>

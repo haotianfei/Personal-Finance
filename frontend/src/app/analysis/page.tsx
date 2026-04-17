@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { PERIOD_OPTIONS } from '@/lib/utils'
@@ -42,6 +42,7 @@ function TrendTab() {
   const [selectedType, setSelectedType] = useState<number | ''>('')
   const [selectedRating, setSelectedRating] = useState('')
   const [selectedAccount, setSelectedAccount] = useState<number | ''>('')
+  const [brushRange, setBrushRange] = useState<{ startIndex: number; endIndex: number } | null>(null)
 
   // 根据维度选择获取数据
   const { data: mixedChartData, isLoading: isLoadingTrend } = useQuery({
@@ -141,66 +142,140 @@ function TrendTab() {
 
   const chartData = getChartData()
 
-  const trendOption = chartData ? {
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'cross' },
-      formatter: (params: Array<{ seriesName: string; value: number; axisValue: string }>) => {
-        let html = `<strong>${params[0].axisValue}</strong><br/>`
-        params.forEach((p) => {
-          const val = Number(p.value).toLocaleString('zh-CN', { minimumFractionDigits: 2 })
-          html += `${p.seriesName}: ¥${val}<br/>`
-        })
-        return html
+  // 计算最近2年的默认选中区域
+  const defaultBrushRange = useMemo(() => {
+    if (!chartData?.trend?.length) return null
+    const total = chartData.trend.length
+    // 最近2年数据：假设月度数据，2年=24个月
+    const periodsPerYear = periodType === 'month' ? 12 : periodType === 'quarter' ? 4 : periodType === 'day' ? 365 : 1
+    const defaultPeriods = Math.min(periodsPerYear * 2, total)
+    return {
+      startIndex: Math.max(0, total - defaultPeriods),
+      endIndex: total - 1,
+    }
+  }, [chartData?.trend, periodType])
+
+  // 根据 brush 范围过滤数据
+  const filteredData = useMemo(() => {
+    if (!chartData) return null
+    const range = brushRange || defaultBrushRange
+    if (!range) return chartData
+
+    return {
+      ...chartData,
+      trend: chartData.trend.slice(range.startIndex, range.endIndex + 1),
+      comparison: chartData.comparison.slice(range.startIndex, range.endIndex + 1),
+    }
+  }, [chartData, brushRange, defaultBrushRange])
+
+  // 处理 brush 事件
+  const handleBrushChange = useCallback((params: { batch?: Array<{ startIndex: number; endIndex: number }> }) => {
+    if (params.batch && params.batch.length > 0) {
+      const { startIndex, endIndex } = params.batch[0]
+      setBrushRange({ startIndex, endIndex })
+    }
+  }, [])
+
+  const trendOption = useMemo(() => {
+    if (!chartData) return {}
+
+    const xAxisData = chartData.trend.map((t: { period: string }) => t.period)
+
+    // 大数据量时使用降采样策略
+    const dataLength = chartData.trend.length
+    const sampling = dataLength > 100 ? 'lttb' : undefined
+
+    return {
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'cross' },
+        formatter: (params: Array<{ seriesName: string; value: number; axisValue: string }>) => {
+          let html = `<strong>${params[0].axisValue}</strong><br/>`
+          params.forEach((p) => {
+            const val = Number(p.value).toLocaleString('zh-CN', { minimumFractionDigits: 2 })
+            html += `${p.seriesName}: ¥${val}<br/>`
+          })
+          return html
+        },
       },
-    },
-    legend: { data: [chartData.name, '变化额'], top: 0, textStyle: { color: '#64748b' } },
-    grid: { top: 40, right: 60, bottom: 30, left: 80 },
-    xAxis: {
-      type: 'category',
-      data: chartData.trend.map((t: { period: string }) => t.period),
-      axisLabel: { fontSize: 11, color: '#94a3b8' },
-      axisLine: { lineStyle: { color: '#e2e8f0' } },
-    },
-    yAxis: [
-      {
-        type: 'value', name: chartData.name,
-        axisLabel: { fontSize: 11, color: '#94a3b8', formatter: (v: number) => `¥${(v / 10000).toFixed(0)}万` },
-        splitLine: { lineStyle: { color: '#f1f5f9' } },
+      legend: { data: [chartData.name, '变化额'], top: 0, textStyle: { color: '#64748b' } },
+      grid: { top: 40, right: 60, bottom: 100, left: 80 },
+      xAxis: {
+        type: 'category',
+        data: filteredData?.trend.map((t: { period: string }) => t.period) || [],
+        axisLabel: { fontSize: 11, color: '#94a3b8' },
+        axisLine: { lineStyle: { color: '#e2e8f0' } },
       },
-      {
-        type: 'value', name: '变化额',
-        axisLabel: { fontSize: 11, color: '#94a3b8', formatter: (v: number) => `¥${(v / 10000).toFixed(1)}万` },
-        splitLine: { show: false },
+      yAxis: [
+        {
+          type: 'value', name: chartData.name,
+          axisLabel: { fontSize: 11, color: '#94a3b8', formatter: (v: number) => `¥${(v / 10000).toFixed(0)}万` },
+          splitLine: { lineStyle: { color: '#f1f5f9' } },
+        },
+        {
+          type: 'value', name: '变化额',
+          axisLabel: { fontSize: 11, color: '#94a3b8', formatter: (v: number) => `¥${(v / 10000).toFixed(1)}万` },
+          splitLine: { show: false },
+        },
+      ],
+      // 缩略轴(brush)组件配置
+      brush: {
+        toolbox: ['rect', 'clear'],
+        brushMode: 'single',
+        brushStyle: {
+          borderWidth: 1,
+          color: 'rgba(59,130,246,0.1)',
+          borderColor: 'rgba(59,130,246,0.5)',
+        },
+        xAxisIndex: 0,
       },
-    ],
-    series: [
-      {
-        name: chartData.name, type: 'line', smooth: true,
-        data: chartData.trend.map((t: { total_amount: string }) => parseFloat(t.total_amount)),
-        lineStyle: { width: 2.5, color: '#3b82f6' },
-        itemStyle: { color: '#3b82f6' },
-        areaStyle: {
-          color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
-            colorStops: [
-              { offset: 0, color: 'rgba(59,130,246,0.12)' },
-              { offset: 1, color: 'rgba(59,130,246,0.01)' },
-            ],
+      // 缩略图(dataZoom)配置
+      dataZoom: [
+        {
+          type: 'slider',
+          show: true,
+          xAxisIndex: 0,
+          startValue: defaultBrushRange?.startIndex ?? 0,
+          endValue: defaultBrushRange?.endIndex ?? (xAxisData.length - 1),
+          height: 30,
+          bottom: 20,
+          borderColor: '#e2e8f0',
+          fillerColor: 'rgba(59,130,246,0.1)',
+          handleStyle: {
+            color: '#3b82f6',
+          },
+          textStyle: { color: '#64748b' },
+        },
+      ],
+      series: [
+        {
+          name: chartData.name, type: 'line', smooth: true,
+          data: filteredData?.trend.map((t: { total_amount: string }) => parseFloat(t.total_amount)) || [],
+          lineStyle: { width: 2.5, color: '#3b82f6' },
+          itemStyle: { color: '#3b82f6' },
+          sampling,
+          areaStyle: {
+            color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+              colorStops: [
+                { offset: 0, color: 'rgba(59,130,246,0.12)' },
+                { offset: 1, color: 'rgba(59,130,246,0.01)' },
+              ],
+            },
           },
         },
-      },
-      {
-        name: '变化额', type: 'bar', yAxisIndex: 1,
-        data: chartData.comparison.map((c: { change_amount: string }) => parseFloat(c.change_amount)),
-        itemStyle: {
-          color: (params: { value: number }) =>
-            params.value >= 0 ? '#ef4444' : '#10b981',
-          borderRadius: [3, 3, 0, 0],
+        {
+          name: '变化额', type: 'bar', yAxisIndex: 1,
+          data: filteredData?.comparison.map((c: { change_amount: string }) => parseFloat(c.change_amount)) || [],
+          itemStyle: {
+            color: (params: { value: number }) =>
+              params.value >= 0 ? '#ef4444' : '#10b981',
+            borderRadius: [3, 3, 0, 0],
+          },
+          barMaxWidth: 30,
         },
-        barMaxWidth: 30,
-      },
-    ],
-  } : {}
+      ],
+    }
+  }, [chartData, filteredData, defaultBrushRange])
 
   return (
     <div className="space-y-6">
@@ -315,9 +390,16 @@ function TrendTab() {
       )}
 
       {chartData ? (
-        <Chart option={trendOption} height="420px" loading={isLoading} />
+        <Chart
+          option={trendOption}
+          height="480px"
+          loading={isLoading}
+          onEvents={{
+            dataZoom: handleBrushChange,
+          }}
+        />
       ) : (
-        <div className="h-[420px] flex items-center justify-center text-slate-400 bg-slate-50 rounded-xl">
+        <div className="h-[480px] flex items-center justify-center text-slate-400 bg-slate-50 rounded-xl">
           {dimension === 'net_worth' ? '加载中...' : '请选择具体维度查看趋势'}
         </div>
       )}
@@ -451,7 +533,8 @@ function ProportionTab() {
     return `¥${Number(amount).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   }
 
-  const getAssetChartOption = () => {
+  // 使用 useMemo 缓存资产图表配置
+  const assetChartOption = useMemo(() => {
     if (!proportionData?.asset_items?.length) return {}
 
     const items = proportionData.asset_items
@@ -629,9 +712,10 @@ function ProportionTab() {
       default:
         return baseOption
     }
-  }
+  }, [proportionData, chartType])
 
-  const getLiabilityChartOption = () => {
+  // 使用 useMemo 缓存负债图表配置
+  const liabilityChartOption = useMemo(() => {
     if (!proportionData?.liability_items?.length) return {}
 
     const items = proportionData.liability_items
@@ -809,7 +893,7 @@ function ProportionTab() {
       default:
         return baseOption
     }
-  }
+  }, [proportionData, chartType])
 
   return (
     <div className="space-y-6">
@@ -927,7 +1011,7 @@ function ProportionTab() {
               资产 - {CHART_TYPES.find(t => t.key === chartType)?.label}
             </h3>
             {proportionData?.asset_items?.length ? (
-              <Chart option={getAssetChartOption()} height="350px" loading={isLoading} />
+              <Chart option={assetChartOption} height="350px" loading={isLoading} />
             ) : (
               <div className="h-[350px] flex items-center justify-center text-slate-400">
                 {isLoading ? '加载中...' : '暂无资产数据'}
@@ -941,7 +1025,7 @@ function ProportionTab() {
               负债 - {CHART_TYPES.find(t => t.key === chartType)?.label}
             </h3>
             {proportionData?.liability_items?.length ? (
-              <Chart option={getLiabilityChartOption()} height="350px" loading={isLoading} />
+              <Chart option={liabilityChartOption} height="350px" loading={isLoading} />
             ) : (
               <div className="h-[350px] flex items-center justify-center text-slate-400">
                 {isLoading ? '加载中...' : '暂无负债数据'}

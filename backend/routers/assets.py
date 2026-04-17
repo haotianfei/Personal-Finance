@@ -33,13 +33,15 @@ def list_assets(
     quarter: Optional[int] = None,
     month: Optional[int] = None,
     day: Optional[int] = None,
+    sort_field: Optional[str] = None,
+    sort_order: Optional[str] = "desc",
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
 ):
     records, total = asset_service.list_records(
         db, asset_date, date_from, date_to, fund_type_id, account_id, owner_id, liquidity_rating_id, asset_name,
-        amount_min, amount_max, period_type, year, quarter, month, day, page, page_size
+        amount_min, amount_max, period_type, year, quarter, month, day, sort_field, sort_order, page, page_size
     )
     items = [asset_service.record_to_out(r) for r in records]
     total_pages = (total + page_size - 1) // page_size

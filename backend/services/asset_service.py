@@ -1,8 +1,8 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy.orm import Session
-from sqlalchemy import select, func, distinct, delete
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import select, func, distinct, delete, asc, desc
 
 from models import AssetRecord, FundType, Account, LiquidityRating, AssetOwner
 from schemas import AssetRecordCreate, AssetRecordOut, AssetRecordTemplate
@@ -43,6 +43,8 @@ def list_records(
     quarter: int | None = None,
     month: int | None = None,
     day: int | None = None,
+    sort_field: str | None = None,
+    sort_order: str | None = "desc",
     page: int = 1,
     page_size: int = 100,
 ) -> tuple[list[AssetRecord], int]:
@@ -121,7 +123,50 @@ def list_records(
     count_q = select(func.count()).select_from(q.subquery())
     total = db.execute(count_q).scalar() or 0
 
-    q = q.order_by(AssetRecord.asset_date.desc(), AssetRecord.asset_name)
+    # 处理排序 - 支持关联表字段排序
+    # 定义关联字段映射：前端字段名 -> (关联表, 关联表字段名)
+    related_sort_fields = {
+        'fund_type_name': (FundType, 'name'),
+        'account_name': (Account, 'name'),
+        'liquidity_rating_name': (LiquidityRating, 'name'),
+        'owner_name': (AssetOwner, 'name'),
+    }
+
+    if sort_field:
+        if sort_field in related_sort_fields:
+            # 关联表字段排序
+            related_model, related_column_name = related_sort_fields[sort_field]
+            related_column = getattr(related_model, related_column_name)
+            
+            # 添加 join 和排序
+            if sort_field == 'fund_type_name':
+                q = q.join(FundType, AssetRecord.fund_type_id == FundType.id, isouter=True)
+            elif sort_field == 'account_name':
+                q = q.join(Account, AssetRecord.account_id == Account.id, isouter=True)
+            elif sort_field == 'liquidity_rating_name':
+                q = q.join(LiquidityRating, AssetRecord.liquidity_rating_id == LiquidityRating.id, isouter=True)
+            elif sort_field == 'owner_name':
+                q = q.join(AssetOwner, AssetRecord.owner_id == AssetOwner.id, isouter=True)
+            
+            if sort_order == "asc":
+                q = q.order_by(asc(related_column))
+            else:
+                q = q.order_by(desc(related_column))
+        else:
+            # 主表字段排序
+            sort_column = getattr(AssetRecord, sort_field, None)
+            if sort_column is not None:
+                if sort_order == "asc":
+                    q = q.order_by(sort_column.asc())
+                else:
+                    q = q.order_by(sort_column.desc())
+            else:
+                # 默认排序
+                q = q.order_by(AssetRecord.asset_date.desc(), AssetRecord.asset_name)
+    else:
+        # 默认排序
+        q = q.order_by(AssetRecord.asset_date.desc(), AssetRecord.asset_name)
+
     q = q.offset((page - 1) * page_size).limit(page_size)
 
     records = db.execute(q).scalars().all()
