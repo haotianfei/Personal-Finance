@@ -4,8 +4,10 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { formatAmount } from '@/lib/utils'
-import { Bell, Plus, Edit2, Trash2, AlertTriangle, TrendingUp, TrendingDown, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react'
+import { Bell, Plus, Edit2, Trash2, AlertTriangle, TrendingUp, TrendingDown, RefreshCw, ChevronDown, ChevronUp, Upload, Download } from 'lucide-react'
+import Link from 'next/link'
 import type { AlertRule, AlertRuleCreate, AlertResult } from '@/types'
+import PeriodPicker from './components/PeriodPicker'
 
 const DIMENSION_OPTIONS = [
   { value: 'asset_name', label: '资产名称' },
@@ -16,6 +18,7 @@ const DIMENSION_OPTIONS = [
 
 const PERIOD_TYPE_OPTIONS = [
   { value: 'day', label: '日' },
+  { value: 'week', label: '周' },
   { value: 'month', label: '月' },
   { value: 'quarter', label: '季度' },
   { value: 'year', label: '年' },
@@ -362,6 +365,7 @@ export default function AlertsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingRule, setEditingRule] = useState<AlertRule | null>(null)
   const [selectedPeriod, setSelectedPeriod] = useState('')
+  const [selectedPeriodType, setSelectedPeriodType] = useState<'day' | 'week' | 'month' | 'quarter' | 'year'>('month')
   const [expandedResults, setExpandedResults] = useState<Set<number>>(new Set())
 
   const { data: rules, isLoading: isLoadingRules } = useQuery({
@@ -370,8 +374,8 @@ export default function AlertsPage() {
   })
 
   const { data: periods } = useQuery({
-    queryKey: ['alertPeriods', 'month'],
-    queryFn: () => api.getAlertPeriods('month'),
+    queryKey: ['alertPeriods', selectedPeriodType],
+    queryFn: () => api.getAlertPeriods(selectedPeriodType),
   })
 
   const { data: results, isLoading: isLoadingResults, refetch: refetchResults } = useQuery({
@@ -432,22 +436,87 @@ export default function AlertsPage() {
 
   // Component to render detail table
   const DetailTable = ({ details }: { details: import('@/types').AlertDetailItem[] }) => {
+    const [sortField, setSortField] = useState<'name' | 'current_amount' | 'compare_amount' | 'change_amount' | 'change_percent'>('change_amount')
+    const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
+
     if (!details || details.length === 0) return null
+
+    const sortedDetails = [...details].sort((a, b) => {
+      let aValue: number | string
+      let bValue: number | string
+
+      switch (sortField) {
+        case 'name':
+          aValue = a.name
+          bValue = b.name
+          break
+        case 'current_amount':
+          aValue = parseFloat(a.current_amount)
+          bValue = parseFloat(b.current_amount)
+          break
+        case 'compare_amount':
+          aValue = parseFloat(a.compare_amount)
+          bValue = parseFloat(b.compare_amount)
+          break
+        case 'change_amount':
+          aValue = parseFloat(a.change_amount)
+          bValue = parseFloat(b.change_amount)
+          break
+        case 'change_percent':
+          aValue = a.change_percent ?? 0
+          bValue = b.change_percent ?? 0
+          break
+        default:
+          return 0
+      }
+
+      if (typeof aValue === 'string' && typeof bValue === 'string') {
+        return sortOrder === 'asc' ? aValue.localeCompare(bValue) : bValue.localeCompare(aValue)
+      }
+
+      return sortOrder === 'asc' ? (aValue as number) - (bValue as number) : (bValue as number) - (aValue as number)
+    })
+
+    const handleSort = (field: typeof sortField) => {
+      if (sortField === field) {
+        setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')
+      } else {
+        setSortField(field)
+        setSortOrder('desc')
+      }
+    }
+
+    const SortHeader = ({ field, children }: { field: typeof sortField; children: React.ReactNode }) => (
+      <th
+        className="py-2 px-2 text-slate-600 font-medium cursor-pointer hover:bg-slate-50 transition-colors select-none"
+        onClick={() => handleSort(field)}
+      >
+        <div className={`flex items-center gap-1 ${field === 'name' ? 'justify-start' : 'justify-end'}`}>
+          {children}
+          {sortField === field && (
+            <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
+          )}
+        </div>
+      </th>
+    )
 
     return (
       <div className="mt-4 overflow-x-auto">
+        <div className="text-xs text-slate-500 mb-2 bg-slate-50 p-2 rounded">
+          <span className="font-medium">说明：</span>以下展示各子项目的独立计算结果，标记"触发"的子项目已达到预警阈值。点击表头可排序，默认按变化金额倒序。
+        </div>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-200">
-              <th className="text-left py-2 px-2 text-slate-600 font-medium">名称</th>
-              <th className="text-right py-2 px-2 text-slate-600 font-medium">当前金额</th>
-              <th className="text-right py-2 px-2 text-slate-600 font-medium">对比金额</th>
-              <th className="text-right py-2 px-2 text-slate-600 font-medium">变化金额</th>
-              <th className="text-right py-2 px-2 text-slate-600 font-medium">变化%</th>
+              <SortHeader field="name">名称</SortHeader>
+              <SortHeader field="current_amount">当前金额</SortHeader>
+              <SortHeader field="compare_amount">对比金额</SortHeader>
+              <SortHeader field="change_amount">变化金额</SortHeader>
+              <SortHeader field="change_percent">变化%</SortHeader>
             </tr>
           </thead>
           <tbody>
-            {details.map((item) => (
+            {sortedDetails.map((item) => (
               <tr
                 key={item.id}
                 className={`border-b border-slate-100 ${item.triggered ? 'bg-red-50' : ''}`}
@@ -488,20 +557,36 @@ export default function AlertsPage() {
           <h1 className="text-2xl font-bold text-brand-950">资产预警</h1>
           <p className="text-sm text-slate-500 mt-1">监控资产变化，及时预警</p>
         </div>
-        <button
-          onClick={() => setIsModalOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 text-white bg-brand-600 rounded-lg hover:bg-brand-700 transition-colors"
-        >
-          <Plus size={18} />
-          创建规则
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => window.open('http://localhost:8000/api/alerts/export', '_blank')}
+            className="flex items-center gap-2 px-4 py-2 text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+          >
+            <Download size={18} />
+            导出规则
+          </button>
+          <Link
+            href="/alerts/import-export"
+            className="flex items-center gap-2 px-4 py-2 text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+          >
+            <Upload size={18} />
+            导入规则
+          </Link>
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 text-white bg-brand-600 rounded-lg hover:bg-brand-700 transition-colors"
+          >
+            <Plus size={18} />
+            创建规则
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1">
           <div className="bg-white rounded-xl shadow-card p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="font-semibold text-brand-950">预警规则</h2>
+              <h2 className="font-semibold text-brand-950">预警规则列表</h2>
               <span className="text-sm text-slate-500">{rules?.length || 0} 条规则</span>
             </div>
 
@@ -570,22 +655,18 @@ export default function AlertsPage() {
 
         <div className="lg:col-span-2">
           <div className="bg-white rounded-xl shadow-card p-6">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-end justify-between mb-4">
               <h2 className="font-semibold text-brand-950">预警结果</h2>
-              <div className="flex items-center gap-3">
-                <select
+              <div className="flex items-end gap-3">
+                <PeriodPicker
                   value={selectedPeriod}
-                  onChange={(e) => setSelectedPeriod(e.target.value)}
-                  className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 bg-white"
-                >
-                  <option value="">最新账期</option>
-                  {periods?.map((p) => (
-                    <option key={p.date} value={p.label}>{p.label}</option>
-                  ))}
-                </select>
+                  onChange={setSelectedPeriod}
+                  periodType={selectedPeriodType}
+                  onPeriodTypeChange={setSelectedPeriodType}
+                />
                 <button
                   onClick={() => refetchResults()}
-                  className="p-1.5 rounded hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
+                  className="p-1.5 rounded hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors mb-0.5"
                   title="刷新"
                 >
                   <RefreshCw size={16} />
@@ -654,7 +735,7 @@ export default function AlertsPage() {
                                 {expandedResults.has(result.rule_id) ? (
                                   <><ChevronUp size={14} /> 收起详情</>
                                 ) : (
-                                  <><ChevronDown size={14} /> 查看详情 ({result.details.length}项)</>
+                                  <><ChevronDown size={14} /> 查看详情 ({result.details.filter(d => d.triggered).length}项触发)</>
                                 )}
                               </button>
                             )}
@@ -672,6 +753,7 @@ export default function AlertsPage() {
                   <div>
                     <div className="flex items-center gap-2 mb-3">
                       <span className="text-sm font-medium text-slate-500">未触发 ({notTriggeredResults.length})</span>
+                      <span className="text-xs text-slate-400">（总体变化未达阈值，但子项目可能有异常）</span>
                     </div>
                     <div className="space-y-2">
                       {notTriggeredResults.map((result) => (
@@ -719,7 +801,7 @@ export default function AlertsPage() {
                                 {expandedResults.has(result.rule_id) ? (
                                   <><ChevronUp size={14} /> 收起详情</>
                                 ) : (
-                                  <><ChevronDown size={14} /> 查看详情 ({result.details.length}项)</>
+                                  <><ChevronDown size={14} /> 查看详情 ({result.details.filter(d => d.triggered).length}项触发)</>
                                 )}
                               </button>
                             )}

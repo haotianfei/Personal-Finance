@@ -122,6 +122,8 @@ def _detect_period_type(period: str) -> Optional[str]:
     """Detect period type from period string format."""
     if "-Q" in period:
         return "quarter"
+    elif "-W" in period:
+        return "week"
     elif len(period) == 4 and period.isdigit():
         return "year"
     elif period.count("-") == 2:
@@ -149,6 +151,15 @@ def _get_previous_period(period: str, period_type: str) -> Optional[str]:
             d = date(year, month, day)
             prev_date = get_previous_period_end(d, "day")
             return prev_date.isoformat()
+    elif period_type == "week":
+        parts = period.split("-W")
+        if len(parts) == 2:
+            year, week = int(parts[0]), int(parts[1])
+            # Get the first day of this week
+            d = date.fromisocalendar(year, week, 1)
+            prev_date = get_previous_period_end(d, "week")
+            prev_year, prev_week, _ = prev_date.isocalendar()
+            return f"{prev_year}-W{prev_week:02d}"
     elif period_type == "month":
         parts = period.split("-")
         if len(parts) == 2:

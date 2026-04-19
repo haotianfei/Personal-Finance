@@ -97,3 +97,4 @@ local_settings.py
 db.sqlite3
 push-to-github.sh
 deploy.sh
+wiki/

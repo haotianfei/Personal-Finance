@@ -130,33 +130,30 @@ def export_tables(
                 "file_size": file_size,
             })
         else:
-            # 导出为多个CSV文件
-            filepaths = export_service.export_tables_to_csv(
+            # 导出为多个CSV文件（打包成ZIP）
+            filepath = export_service.export_tables_to_csv(
                 db, request.tables, filename_prefix=prefix
             )
+            filename = os.path.basename(filepath)
+            file_size = os.path.getsize(filepath)
 
-            for filepath in filepaths:
-                filename = os.path.basename(filepath)
-                file_size = os.path.getsize(filepath)
-
-                # 记录导出历史
-                history = ExportHistory(
-                    export_type="manual",
-                    filename=filename,
-                    file_size=file_size,
-                    operator=operator,
-                    rule_name=None,
-                    file_path=filepath,
-                )
-                db.add(history)
-
-                exported_files.append({
-                    "filename": filename,
-                    "file_path": filepath,
-                    "file_size": file_size,
-                })
-
+            # 记录导出历史
+            history = ExportHistory(
+                export_type="manual",
+                filename=filename,
+                file_size=file_size,
+                operator=operator,
+                rule_name=None,
+                file_path=filepath,
+            )
+            db.add(history)
             db.commit()
+
+            exported_files.append({
+                "filename": filename,
+                "file_path": filepath,
+                "file_size": file_size,
+            })
 
         return ExportResponse(
             success=True,

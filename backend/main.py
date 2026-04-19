@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
-from routers import assets, analysis, imports, dimensions, management, exports, proportion, liquidity_ratings, alerts, allocations, export_history, asset_owners
+from routers import assets, analysis, imports, dimensions, management, exports, proportion, liquidity_ratings, alerts, allocations, export_history, asset_owners, backup
 from services.scheduler_service import init_scheduler, shutdown_scheduler
 from services.auto_export_service import load_auto_export_rules
 from services.db_migration_service import migrate_database
@@ -65,6 +65,7 @@ app.include_router(alerts.router, prefix="/api/alerts", tags=["预警"])
 app.include_router(allocations.router, prefix="/api/allocation", tags=["资产配置"])
 app.include_router(export_history.router, prefix="/api/export-history", tags=["导出历史"])
 app.include_router(asset_owners.router, prefix="/api/asset-owners", tags=["资产所有者"])
+app.include_router(backup.router, prefix="/api/backup", tags=["备份与恢复"])
 
 
 @app.get("/api/health")

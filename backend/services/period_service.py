@@ -5,6 +5,10 @@ from calendar import monthrange
 def get_period_label(d: date, period_type: str) -> str:
     if period_type == "day":
         return d.isoformat()
+    elif period_type == "week":
+        # ISO week format: YYYY-WNN
+        year, week, _ = d.isocalendar()
+        return f"{year}-W{week:02d}"
     elif period_type == "month":
         return f"{d.year}-{d.month:02d}"
     elif period_type == "quarter":
@@ -18,6 +22,14 @@ def get_period_label(d: date, period_type: str) -> str:
 def get_period_start_end(d: date, period_type: str) -> tuple[date, date]:
     if period_type == "day":
         return d, d
+    elif period_type == "week":
+        # ISO week: Monday is the first day
+        year, week, weekday = d.isocalendar()
+        # Calculate the Monday of this week
+        monday = d - timedelta(days=weekday - 1)
+        # Calculate the Sunday of this week
+        sunday = monday + timedelta(days=6)
+        return monday, sunday
     elif period_type == "month":
         last_day = monthrange(d.year, d.month)[1]
         return date(d.year, d.month, 1), date(d.year, d.month, last_day)

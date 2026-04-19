@@ -11,13 +11,13 @@ import { useState } from 'react'
 
 const NAV_ITEMS = [
   { href: '/', label: '仪表盘', icon: LayoutDashboard },
+  { href: '/records', label: '资产记录', icon: FileText },
   { href: '/analysis', label: '数据分析', icon: BarChart3 },
   { href: '/allocation', label: '资产配置', icon: PieChart },
   { href: '/alerts', label: '资产预警', icon: Bell },
 ]
 
 const DATA_MANAGEMENT_ITEMS = [
-  { href: '/records', label: '资产记录', icon: FileText },
   { href: '/import', label: '数据导入', icon: Upload },
   { href: '/export', label: '数据导出', icon: Download },
 ]
@@ -27,7 +27,7 @@ const DB_MAINTENANCE_ITEMS = [
   { href: '/accounts', label: '账户管理', icon: Wallet },
   { href: '/liquidity-ratings', label: '流动性评级管理', icon: Settings },
   { href: '/asset-owners', label: '资产拥有人管理', icon: Users },
-  { href: '/settings/backup-import', label: '备份与导入', icon: Database },
+  { href: '/settings/backup-restore', label: '备份与恢复', icon: Database },
 ]
 
 export default function Sidebar() {

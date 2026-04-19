@@ -352,8 +352,8 @@ def export_tables_to_csv(
     db: Session,
     table_names: List[str],
     filename_prefix: str = "export"
-) -> List[str]:
-    """导出多个表到CSV文件（每个表一个文件）
+) -> str:
+    """导出多个表到CSV文件（打包成ZIP）
 
     Args:
         db: 数据库会话
@@ -361,26 +361,27 @@ def export_tables_to_csv(
         filename_prefix: 文件名前缀
 
     Returns:
-        生成的文件路径列表
+        生成的ZIP文件路径
     """
+    import zipfile
+    
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filepaths = []
+    zip_filename = f"{filename_prefix}_csv_{timestamp}.zip"
+    zip_filepath = os.path.join(EXPORTS_DIR, zip_filename)
+    
+    # 创建ZIP文件
+    with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for table_name in table_names:
+            if table_name not in TABLE_MAP:
+                continue
 
-    for table_name in table_names:
-        if table_name not in TABLE_MAP:
-            continue
+            csv_content = export_table_to_csv(db, table_name)
+            csv_filename = f"{table_name}.csv"
+            
+            # 将CSV内容写入ZIP
+            zipf.writestr(csv_filename, csv_content.encode('utf-8'))
 
-        filename = f"{filename_prefix}_{table_name}_{timestamp}.csv"
-        filepath = os.path.join(EXPORTS_DIR, filename)
-
-        csv_content = export_table_to_csv(db, table_name)
-
-        with open(filepath, 'w', encoding='utf-8', newline='') as f:
-            f.write(csv_content)
-
-        filepaths.append(filepath)
-
-    return filepaths
+    return zip_filepath
 
 
 def create_full_backup(db: Session) -> str:

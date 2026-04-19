@@ -18,6 +18,146 @@ from models import AssetRecord, FundType, Account, ImportBatch, LiquidityRating,
 from schemas import ImportPreviewRow, NewAttribute
 
 
+# 配置表外键映射关系
+CONFIG_TABLES = {
+    'accounts': {'model': Account, 'key_field': 'name', 'id_field': 'id'},
+    'fund_types': {'model': FundType, 'key_field': 'name', 'id_field': 'id'},
+    'liquidity_ratings': {'model': LiquidityRating, 'key_field': 'name', 'id_field': 'id'},
+    'asset_owners': {'model': AssetOwner, 'key_field': 'name', 'id_field': 'id'},
+}
+
+# asset_records 的外键依赖
+ASSET_RECORDS_FOREIGN_KEYS = {
+    'account_id': {'table': 'accounts', 'model': Account, 'key_field': 'name'},
+    'fund_type_id': {'table': 'fund_types', 'model': FundType, 'key_field': 'name'},
+    'liquidity_rating_id': {'table': 'liquidity_ratings', 'model': LiquidityRating, 'key_field': 'name'},
+    'owner_id': {'table': 'asset_owners', 'model': AssetOwner, 'key_field': 'name'},
+}
+
+
+class ForeignKeyMapper:
+    """外键映射管理器 - 用于智能映射模式"""
+    
+    def __init__(self):
+        # 存储源ID到目标ID的映射
+        # 格式: {table_name: {source_id: target_id}}
+        self.id_mappings: Dict[str, Dict[int, int]] = {}
+        # 存储无法映射的ID
+        self.unmapped_ids: Dict[str, set] = {}
+    
+    def add_mapping(self, table_name: str, source_id: int, target_id: int):
+        """添加ID映射关系"""
+        if table_name not in self.id_mappings:
+            self.id_mappings[table_name] = {}
+        self.id_mappings[table_name][source_id] = target_id
+        print(f"[MAPPER] {table_name}: {source_id} -> {target_id}")
+    
+    def get_target_id(self, table_name: str, source_id: Optional[int]) -> Optional[int]:
+        """获取目标ID，如果无法映射返回None"""
+        if source_id is None:
+            return None
+        if table_name not in self.id_mappings:
+            return None
+        return self.id_mappings[table_name].get(source_id)
+    
+    def add_unmapped(self, table_name: str, source_id: int):
+        """记录无法映射的ID"""
+        if table_name not in self.unmapped_ids:
+            self.unmapped_ids[table_name] = set()
+        self.unmapped_ids[table_name].add(source_id)
+        print(f"[MAPPER] {table_name}: {source_id} 无法映射")
+    
+    def is_unmapped(self, table_name: str, source_id: int) -> bool:
+        """检查ID是否无法映射"""
+        return table_name in self.unmapped_ids and source_id in self.unmapped_ids[table_name]
+    
+    def build_mapping_from_config_table(self, db: Session, table_name: str, source_data: list[dict]):
+        """从配置表数据构建ID映射
+        
+        基于key_field（如name）匹配源记录和目标记录，建立ID映射
+        """
+        if table_name not in CONFIG_TABLES:
+            print(f"[MAPPER] 未知的配置表: {table_name}")
+            return
+        
+        config = CONFIG_TABLES[table_name]
+        model = config['model']
+        key_field = config['key_field']
+        id_field = config['id_field']
+        
+        print(f"[MAPPER] 构建 {table_name} 的ID映射...")
+        
+        for source_row in source_data:
+            source_id = source_row.get(id_field)
+            key_value = source_row.get(key_field)
+            
+            if source_id is None or key_value is None:
+                continue
+            
+            # 在目标数据库中查找匹配的记录
+            target_record = db.execute(
+                select(model).where(getattr(model, key_field) == key_value)
+            ).scalar_one_or_none()
+            
+            if target_record:
+                target_id = getattr(target_record, id_field)
+                self.add_mapping(table_name, source_id, target_id)
+            else:
+                self.add_unmapped(table_name, source_id)
+        
+        mapped_count = len(self.id_mappings.get(table_name, {}))
+        unmapped_count = len(self.unmapped_ids.get(table_name, set()))
+        print(f"[MAPPER] {table_name} 映射完成: {mapped_count} 个已映射, {unmapped_count} 个无法映射")
+    
+    def remap_asset_record_foreign_keys(self, row: dict) -> dict:
+        """重新映射asset_records的外键ID
+        
+        将源数据中的外键ID替换为目标系统的ID
+        """
+        new_row = row.copy()
+        
+        for fk_field, fk_config in ASSET_RECORDS_FOREIGN_KEYS.items():
+            if fk_field not in row:
+                continue
+            
+            source_id = row[fk_field]
+            if source_id is None:
+                continue
+            
+            table_name = fk_config['table']
+            target_id = self.get_target_id(table_name, source_id)
+            
+            if target_id is not None:
+                new_row[fk_field] = target_id
+                print(f"[MAPPER] 外键映射: {fk_field} {source_id} -> {target_id}")
+            elif self.is_unmapped(table_name, source_id):
+                # 无法映射，标记为None（后续会跳过这条记录）
+                new_row[fk_field] = None
+                print(f"[MAPPER] 外键无法映射: {fk_field}={source_id}")
+        
+        return new_row
+    
+    def has_unmapped_foreign_keys(self, row: dict) -> bool:
+        """检查asset_record是否有无法映射的外键"""
+        for fk_field, fk_config in ASSET_RECORDS_FOREIGN_KEYS.items():
+            if fk_field not in row or row[fk_field] is None:
+                continue
+            
+            source_id = row[fk_field]
+            table_name = fk_config['table']
+            
+            # 检查是否无法映射
+            if self.is_unmapped(table_name, source_id):
+                return True
+            
+            # 检查是否有映射（如果没有映射且不是None，说明未处理）
+            if self.get_target_id(table_name, source_id) is None:
+                # 可能是新数据，需要检查是否在目标数据库中存在
+                pass
+        
+        return False
+
+
 def normalize_amount(raw: str) -> Decimal:
     s = raw.strip().strip('"').strip("'")
     s = s.replace("\uff65", "").replace("\u00a5", "")
@@ -698,6 +838,59 @@ def import_table(
         # 获取目标表的默认值
         target_col_info = {col["name"]: col for col in target_columns}
 
+        # 对 fund_types 表进行特殊处理：按层级顺序导入（先父后子）
+        if table_name == "fund_types":
+            # 将行数据转换为列表
+            rows_list = [dict(row) for row in rows]
+            print(f"[IMPORT DEBUG] fund_types 原始数据行数: {len(rows_list)}")
+            for row in rows_list:
+                print(f"[IMPORT DEBUG] 原始数据: id={row.get('id')}, name={row.get('name')}, parent_id={row.get('parent_id')}, level={row.get('level')}")
+            
+            # 构建 id 到 row 的映射
+            id_to_row = {row.get("id"): row for row in rows_list if row.get("id") is not None}
+            print(f"[IMPORT DEBUG] id_to_row 映射: {list(id_to_row.keys())}")
+            
+            # 计算每个节点的实际层级深度（从根节点开始）
+            def get_depth(row, visited=None):
+                """递归计算节点的深度"""
+                if visited is None:
+                    visited = set()
+                
+                row_id = row.get("id")
+                if row_id in visited:
+                    print(f"[IMPORT DEBUG] 检测到循环引用: id={row_id}")
+                    return 0  # 避免循环引用
+                visited.add(row_id)
+                
+                parent_id = row.get("parent_id")
+                if parent_id is None:
+                    return 0  # 根节点
+                elif parent_id not in id_to_row:
+                    print(f"[IMPORT DEBUG] 父节点不存在于当前导入数据: id={row_id}, parent_id={parent_id}")
+                    return 0  # 父节点不在当前导入集合中，视为根节点
+                else:
+                    parent = id_to_row[parent_id]
+                    return 1 + get_depth(parent, visited.copy())
+            
+            # 计算每个节点的深度
+            for row in rows_list:
+                row['_depth'] = get_depth(row)
+                print(f"[IMPORT DEBUG] 计算深度: id={row.get('id')}, name={row.get('name')}, depth={row['_depth']}")
+            
+            # 按深度排序，深度小的先导入（根节点优先）
+            rows_list.sort(key=lambda x: (x['_depth'], x.get("id") or 0))
+            print(f"[IMPORT DEBUG] 排序后顺序:")
+            for row in rows_list:
+                print(f"[IMPORT DEBUG] 排序后: id={row.get('id')}, name={row.get('name')}, parent_id={row.get('parent_id')}, depth={row['_depth']}")
+            
+            # 移除临时字段
+            for row in rows_list:
+                del row['_depth']
+            
+            rows = rows_list
+        else:
+            rows = [dict(row) for row in rows]
+
         for row in rows:
             row_dict = dict(row)
 
@@ -925,9 +1118,10 @@ def preview_table_import(
 def import_multiple_tables(
     source_db_path: str,
     target_db: Session,
-    table_configs: list[dict]
+    table_configs: list[dict],
+    fk_mapper: Optional[ForeignKeyMapper] = None
 ) -> list[ImportResult]:
-    """导入多个表
+    """导入多个表（按依赖关系排序）
 
     Args:
         source_db_path: 源数据库文件路径
@@ -936,25 +1130,127 @@ def import_multiple_tables(
             - table_name: 表名
             - conflict_strategy: 冲突策略
             - merge_rules: 合并规则
+        fk_mapper: 外键映射器，用于智能映射模式。如果为None，则自动创建
 
     Returns:
         导入结果列表
     """
-    results = []
+    # 如果没有提供外键映射器，创建一个
+    if fk_mapper is None:
+        fk_mapper = ForeignKeyMapper()
+    # 定义表的依赖关系（被依赖的表先导入）
+    # asset_records 依赖: liquidity_ratings, fund_types, accounts, asset_owners
+    # allocation_targets 依赖: allocation_targets (自引用)
+    table_dependencies = {
+        "asset_records": ["liquidity_ratings", "fund_types", "accounts", "asset_owners"],
+        "allocation_targets": ["allocation_targets"],  # 自引用，需要特殊处理
+    }
 
-    for config in table_configs:
+    # 拓扑排序：确保依赖的表先导入
+    def topological_sort(configs: list[dict]) -> list[dict]:
+        """对表配置进行拓扑排序"""
+        # 构建图
+        graph = {config.get("table_name"): [] for config in configs}
+        in_degree = {config.get("table_name"): 0 for config in configs}
+        
+        # 只考虑在 configs 中的表之间的依赖
+        table_names = set(graph.keys())
+        for config in configs:
+            table_name = config.get("table_name")
+            deps = table_dependencies.get(table_name, [])
+            for dep in deps:
+                if dep in table_names and dep != table_name:  # 排除自引用
+                    graph[dep].append(table_name)
+                    in_degree[table_name] += 1
+        
+        # Kahn 算法
+        queue = [name for name, degree in in_degree.items() if degree == 0]
+        sorted_names = []
+        
+        while queue:
+            # 按名称排序，确保确定性顺序
+            queue.sort()
+            current = queue.pop(0)
+            sorted_names.append(current)
+            
+            for neighbor in graph[current]:
+                in_degree[neighbor] -= 1
+                if in_degree[neighbor] == 0:
+                    queue.append(neighbor)
+        
+        # 如果有环，剩下的就是环中的节点
+        if len(sorted_names) != len(configs):
+            remaining = [name for name in in_degree if name not in sorted_names]
+            print(f"[IMPORT WARNING] 检测到循环依赖或无法排序的表: {remaining}")
+            # 将剩余的表按名称排序后添加
+            sorted_names.extend(sorted(remaining))
+        
+        # 构建结果
+        name_to_config = {config.get("table_name"): config for config in configs}
+        return [name_to_config[name] for name in sorted_names]
+
+    # 对配置进行拓扑排序
+    sorted_configs = topological_sort(table_configs)
+    
+    print(f"[IMPORT DEBUG] 导入顺序: {[c.get('table_name') for c in sorted_configs]}")
+
+    # 定义配置表（asset_records 依赖的表）
+    config_tables = {"accounts", "fund_types", "liquidity_ratings", "asset_owners"}
+
+    results = []
+    config_table_errors = []  # 记录配置表的导入错误
+
+    for config in sorted_configs:
         table_name = config.get("table_name")
         conflict_strategy = config.get("conflict_strategy", "skip")
         merge_rules = config.get("merge_rules", {})
 
+        # 如果配置表有错误，跳过 asset_records 的导入
+        if table_name == "asset_records" and config_table_errors:
+            error_msg = f"配置表导入有错误或警告，跳过导入: {', '.join(config_table_errors)}"
+            print(f"[IMPORT WARNING] {error_msg}")
+            results.append(ImportResult(
+                table_name=table_name,
+                errors=[error_msg],
+                message=error_msg
+            ))
+            continue
+
         try:
-            result = import_table(source_db_path, target_db, table_name, conflict_strategy, merge_rules)
+            # 对于配置表，先读取源数据建立ID映射
+            if table_name in config_tables:
+                # 从源数据库读取数据以建立ID映射
+                source_conn = sqlite3.connect(source_db_path)
+                source_conn.row_factory = sqlite3.Row
+                try:
+                    cursor = source_conn.execute(f"SELECT * FROM {table_name}")
+                    source_data = [dict(row) for row in cursor.fetchall()]
+                    fk_mapper.build_mapping_from_config_table(target_db, table_name, source_data)
+                finally:
+                    source_conn.close()
+
+            # 导入表数据
+            if table_name == "asset_records":
+                # 使用支持外键映射的导入函数
+                result = _import_asset_records_with_mapping(
+                    source_db_path, target_db, table_name, conflict_strategy, fk_mapper
+                )
+            else:
+                result = import_table(source_db_path, target_db, table_name, conflict_strategy, merge_rules)
             results.append(result)
+
+            # 检查配置表是否有错误或警告
+            if table_name in config_tables:
+                if result.errors or result.error_count > 0:
+                    config_table_errors.append(f"{table_name}({result.error_count}个错误)")
+                    print(f"[IMPORT WARNING] 配置表 {table_name} 导入有 {result.error_count} 个错误")
         except Exception as e:
             results.append(ImportResult(
                 table_name=table_name,
                 errors=[str(e)]
             ))
+            if table_name in config_tables:
+                config_table_errors.append(f"{table_name}(异常)")
 
     return results
 
@@ -1018,7 +1314,7 @@ def cleanup_temp_data_file(file_path: str):
 
 
 def analyze_csv_file(file_path: str) -> Dict:
-    """分析 CSV 文件内容
+    """分析 CSV 文件内容，根据列名推断表名
 
     Args:
         file_path: CSV 文件路径
@@ -1028,6 +1324,19 @@ def analyze_csv_file(file_path: str) -> Dict:
     """
     import csv
 
+    # 表字段映射（用于识别 CSV 对应的表）
+    TABLE_FIELD_PATTERNS = {
+        "accounts": {"required": ["name"], "optional": ["id", "created_at"]},
+        "fund_types": {"required": ["name"], "optional": ["id", "parent_id", "level", "created_at"]},
+        "liquidity_ratings": {"required": ["name"], "optional": ["id", "sort_order", "created_at"]},
+        "asset_owners": {"required": ["name"], "optional": ["id", "description", "created_at", "updated_at"]},
+        "alert_rules": {"required": ["name", "dimension", "period_type", "compare_type"], "optional": ["id", "target_id", "amount_threshold", "percent_threshold", "direction", "is_active", "created_at", "updated_at"]},
+        "allocation_targets": {"required": ["dimension", "target_id", "target_percent"], "optional": ["id", "parent_id", "created_at", "updated_at"]},
+        "auto_export_rules": {"required": ["name", "cron_expression", "export_format"], "optional": ["id", "filename_template", "is_active", "last_run_at", "next_run_at", "created_at", "updated_at"]},
+        "export_history": {"required": ["export_time", "export_type", "filename"], "optional": ["id", "file_size", "operator", "rule_name", "file_path", "created_at"]},
+        "asset_records": {"required": ["asset_date", "asset_name", "amount"], "optional": ["id", "liquidity_rating_id", "fund_type_id", "account_id", "owner_id", "import_batch_id", "created_at", "updated_at"]},
+    }
+
     with open(file_path, 'r', encoding='utf-8-sig') as f:
         # 读取表头
         sample = f.read(8192)
@@ -1035,6 +1344,7 @@ def analyze_csv_file(file_path: str) -> Dict:
 
         reader = csv.reader(f)
         headers = next(reader, [])
+        headers_set = set(headers)
 
         # 读取前10行数据作为预览
         preview_rows = []
@@ -1047,8 +1357,30 @@ def analyze_csv_file(file_path: str) -> Dict:
         f.seek(0)
         total_rows = sum(1 for _ in f) - 1  # 减去表头
 
+    # 根据列名推断表名
+    detected_table = "asset_records"  # 默认表名
+    best_match_score = 0
+
+    for table_name, patterns in TABLE_FIELD_PATTERNS.items():
+        required_fields = set(patterns["required"])
+        optional_fields = set(patterns["optional"])
+        all_fields = required_fields | optional_fields
+
+        # 检查是否包含所有必需字段
+        if required_fields.issubset(headers_set):
+            # 计算匹配分数：匹配字段数 / 总字段数
+            matched_fields = headers_set & all_fields
+            match_score = len(matched_fields) / len(headers_set) if headers_set else 0
+
+            # 优先选择匹配度更高的表
+            if match_score > best_match_score:
+                best_match_score = match_score
+                detected_table = table_name
+
+    print(f"[CSV ANALYZE] 检测到的表: {detected_table}, 列名: {headers}, 匹配分数: {best_match_score:.2f}")
+
     return {
-        "tables": ["asset_records"],  # CSV 通常只包含一个表
+        "tables": [detected_table],
         "headers": headers,
         "total_rows": total_rows,
         "preview_rows": preview_rows,
@@ -1203,7 +1535,13 @@ def preview_json_import(file_path: str, db: Session, table_name: str) -> Dict:
     }
 
 
-def import_csv_data_file(file_path: str, db: Session, table_name: str, conflict_strategy: str) -> Dict:
+def import_csv_data_file(
+    file_path: str,
+    db: Session,
+    table_name: str,
+    conflict_strategy: str,
+    fk_mapper: Optional[ForeignKeyMapper] = None
+) -> Dict:
     """导入 CSV 数据文件
 
     Args:
@@ -1211,6 +1549,7 @@ def import_csv_data_file(file_path: str, db: Session, table_name: str, conflict_
         db: 数据库会话
         table_name: 目标表名
         conflict_strategy: 冲突处理策略 (skip/overwrite/merge)
+        fk_mapper: 外键映射器，用于智能映射模式
 
     Returns:
         导入结果
@@ -1221,34 +1560,134 @@ def import_csv_data_file(file_path: str, db: Session, table_name: str, conflict_
         reader = csv.DictReader(f)
         rows = list(reader)
 
+    # 配置表：建立ID映射（如果提供了fk_mapper）
+    if fk_mapper and table_name in CONFIG_TABLES and rows:
+        print(f"[IMPORT DEBUG] CSV import_csv_data_file - 为配置表 {table_name} 建立ID映射")
+        fk_mapper.build_mapping_from_config_table(db, table_name, rows)
+
+    # 对 fund_types 表进行特殊处理：按层级顺序导入（先父后子）
+    if table_name == "fund_types" and rows:
+        print(f"[IMPORT DEBUG] CSV import_csv_data_file - fund_types 原始数据行数: {len(rows)}")
+        
+        # 构建 id 到 row 的映射
+        id_to_row = {int(row.get("id")): row for row in rows if row.get("id") is not None}
+        
+        # 计算每个节点的实际层级深度（从根节点开始）
+        def get_depth(row, visited=None):
+            """递归计算节点的深度"""
+            if visited is None:
+                visited = set()
+            
+            row_id = int(row.get("id")) if row.get("id") else None
+            if row_id in visited:
+                return 0  # 避免循环引用
+            visited.add(row_id)
+            
+            parent_id = int(row.get("parent_id")) if row.get("parent_id") else None
+            if parent_id is None:
+                return 0  # 根节点
+            elif parent_id not in id_to_row:
+                return 0  # 父节点不在当前导入集合中，视为根节点
+            else:
+                parent = id_to_row[parent_id]
+                return 1 + get_depth(parent, visited.copy())
+        
+        # 计算每个节点的深度
+        for row in rows:
+            row['_depth'] = get_depth(row)
+        
+        # 按深度排序，深度小的先导入（根节点优先）
+        rows.sort(key=lambda x: (int(x.get('_depth', 0)) if x.get('_depth') else 0, int(x.get("id") or 0)))
+        
+        # 移除临时字段
+        for row in rows:
+            if '_depth' in row:
+                del row['_depth']
+        
+        print(f"[IMPORT DEBUG] CSV import_csv_data_file - 排序后顺序:")
+        for row in rows:
+            print(f"[IMPORT DEBUG] 排序后: id={row.get('id')}, name={row.get('name')}, parent_id={row.get('parent_id')}")
+
     imported = 0
     skipped = 0
     overwritten = 0
     errors = []
 
-    for row in rows:
-        try:
-            if table_name == "asset_records":
-                result = _import_asset_record_row(db, row, conflict_strategy)
+    # 对 fund_types 使用特殊导入逻辑，维护 ID 映射关系
+    if table_name == "fund_types":
+        id_mapping = {}  # 旧 ID -> 新 ID 的映射
+        for row in rows:
+            try:
+                result, old_id, new_id = _import_fund_type_row(db, row, conflict_strategy, id_mapping)
+                if old_id and new_id:
+                    id_mapping[old_id] = new_id
                 if result == "imported":
                     imported += 1
                 elif result == "skipped":
                     skipped += 1
                 elif result == "overwritten":
                     overwritten += 1
-            else:
-                # 其他表的导入逻辑 - 根据表名处理冲突
-                result = _import_generic_row(db, table_name, row, conflict_strategy)
-                if result == "imported":
-                    imported += 1
-                elif result == "skipped":
-                    skipped += 1
-                elif result == "overwritten":
-                    overwritten += 1
-        except Exception as e:
-            errors.append(f"Row {row}: {str(e)}")
+                # 逐行提交，避免批量更新导致的唯一约束冲突
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                errors.append(f"Row {row}: {str(e)}")
+    else:
+        for row in rows:
+            try:
+                if table_name == "asset_records":
+                    # 使用外键映射器重新映射外键ID（如果提供了fk_mapper）
+                    if fk_mapper:
+                        # 检查是否有无法映射的外键
+                        if fk_mapper.has_unmapped_foreign_keys(row):
+                            unmapped_fks = []
+                            for fk_field, fk_config in ASSET_RECORDS_FOREIGN_KEYS.items():
+                                if fk_field in row and row[fk_field] is not None:
+                                    source_id = row[fk_field]
+                                    table_name_fk = fk_config['table']
+                                    if fk_mapper.is_unmapped(table_name_fk, source_id):
+                                        unmapped_fks.append(f"{fk_field}={source_id}")
+                            error_msg = f"外键无法映射: {', '.join(unmapped_fks)}, asset_name={row.get('asset_name')}"
+                            print(f"[IMPORT ERROR] {error_msg}")
+                            errors.append(error_msg)
+                            skipped += 1
+                            continue
 
-    db.commit()
+                        # 重新映射外键
+                        row = fk_mapper.remap_asset_record_foreign_keys(row)
+
+                    result = _import_asset_record_row(db, row, conflict_strategy)
+                    if result == "imported":
+                        imported += 1
+                    elif result == "skipped":
+                        skipped += 1
+                    elif result == "overwritten":
+                        overwritten += 1
+                else:
+                    # 其他表的导入逻辑 - 根据表名处理冲突
+                    result = _import_generic_row(db, table_name, row, conflict_strategy)
+                    if result == "imported":
+                        imported += 1
+                    elif result == "skipped":
+                        skipped += 1
+                    elif result == "overwritten":
+                        overwritten += 1
+                # 逐行提交，避免批量更新导致的唯一约束冲突
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                error_msg = f"Row {row}: {str(e)}"
+                errors.append(error_msg)
+                print(f"[IMPORT ERROR] {table_name}: {error_msg}")
+
+    # 打印导入结果摘要
+    print(f"[IMPORT SUMMARY] 表: {table_name}, 总计: {len(rows)}, 新导入: {imported}, 覆盖: {overwritten}, 跳过: {skipped}, 错误: {len(errors)}")
+    if errors:
+        print(f"[IMPORT ERRORS] {table_name} 错误详情:")
+        for i, error in enumerate(errors[:10]):  # 只打印前10个错误
+            print(f"  [{i+1}] {error}")
+        if len(errors) > 10:
+            print(f"  ... 还有 {len(errors) - 10} 个错误")
 
     return {
         "success": len(errors) == 0,
@@ -1277,7 +1716,13 @@ def import_csv_data_file(file_path: str, db: Session, table_name: str, conflict_
     }
 
 
-def import_json_data_file(file_path: str, db: Session, table_name: str, conflict_strategy: str) -> Dict:
+def import_json_data_file(
+    file_path: str,
+    db: Session,
+    table_name: str,
+    conflict_strategy: str,
+    fk_mapper: Optional[ForeignKeyMapper] = None
+) -> Dict:
     """导入 JSON 数据文件
 
     Args:
@@ -1285,6 +1730,7 @@ def import_json_data_file(file_path: str, db: Session, table_name: str, conflict
         db: 数据库会话
         table_name: 目标表名
         conflict_strategy: 冲突处理策略
+        fk_mapper: 外键映射器，用于智能映射模式
 
     Returns:
         导入结果
@@ -1305,34 +1751,114 @@ def import_json_data_file(file_path: str, db: Session, table_name: str, conflict
         elif table_name in data and isinstance(data[table_name], dict):
             rows = data[table_name].get("data", [])
 
+    # 配置表：建立ID映射（如果提供了fk_mapper）
+    if fk_mapper and table_name in CONFIG_TABLES and rows:
+        print(f"[IMPORT DEBUG] JSON import_json_data_file - 为配置表 {table_name} 建立ID映射")
+        fk_mapper.build_mapping_from_config_table(db, table_name, rows)
+
+    # 对 fund_types 表进行特殊处理：按层级顺序导入（先父后子）
+    if table_name == "fund_types" and rows:
+        print(f"[IMPORT DEBUG] JSON import_json_data_file - fund_types 原始数据行数: {len(rows)}")
+
+        # 构建 id 到 row 的映射
+        id_to_row = {row.get("id"): row for row in rows if row.get("id") is not None}
+
+        # 计算每个节点的实际层级深度（从根节点开始）
+        def get_depth(row, visited=None):
+            """递归计算节点的深度"""
+            if visited is None:
+                visited = set()
+
+            row_id = row.get("id")
+            if row_id in visited:
+                return 0  # 避免循环引用
+            visited.add(row_id)
+
+            parent_id = row.get("parent_id")
+            if parent_id is None:
+                return 0  # 根节点
+            elif parent_id not in id_to_row:
+                return 0  # 父节点不在当前导入集合中，视为根节点
+            else:
+                parent = id_to_row[parent_id]
+                return 1 + get_depth(parent, visited.copy())
+
+        # 计算每个节点的深度
+        for row in rows:
+            row['_depth'] = get_depth(row)
+
+        # 按深度排序，深度小的先导入（根节点优先）
+        rows.sort(key=lambda x: (x.get('_depth', 0), x.get("id") or 0))
+
+        # 移除临时字段
+        for row in rows:
+            if '_depth' in row:
+                del row['_depth']
+
+        print(f"[IMPORT DEBUG] JSON import_json_data_file - 排序后顺序:")
+        for row in rows:
+            print(f"[IMPORT DEBUG] 排序后: id={row.get('id')}, name={row.get('name')}, parent_id={row.get('parent_id')}")
+
     imported = 0
     skipped = 0
     overwritten = 0
     errors = []
 
-    for row in rows:
-        try:
-            if table_name == "asset_records":
-                result = _import_asset_record_row(db, row, conflict_strategy)
+    # 对 fund_types 使用特殊导入逻辑，维护 ID 映射关系
+    if table_name == "fund_types":
+        id_mapping = {}  # 旧 ID -> 新 ID 的映射
+        for row in rows:
+            try:
+                result, old_id, new_id = _import_fund_type_row(db, row, conflict_strategy, id_mapping)
+                if old_id and new_id:
+                    id_mapping[old_id] = new_id
                 if result == "imported":
                     imported += 1
                 elif result == "skipped":
                     skipped += 1
                 elif result == "overwritten":
                     overwritten += 1
-            else:
-                # 其他表的导入逻辑 - 根据表名处理冲突
-                result = _import_generic_row(db, table_name, row, conflict_strategy)
-                if result == "imported":
-                    imported += 1
-                elif result == "skipped":
-                    skipped += 1
-                elif result == "overwritten":
-                    overwritten += 1
-        except Exception as e:
-            errors.append(f"Row {row}: {str(e)}")
+                # 逐行提交，避免批量更新导致的唯一约束冲突
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                errors.append(f"Row {row}: {str(e)}")
+    else:
+        for row in rows:
+            try:
+                if table_name == "asset_records":
+                    result = _import_asset_record_row(db, row, conflict_strategy)
+                    if result == "imported":
+                        imported += 1
+                    elif result == "skipped":
+                        skipped += 1
+                    elif result == "overwritten":
+                        overwritten += 1
+                else:
+                    # 其他表的导入逻辑 - 根据表名处理冲突
+                    result = _import_generic_row(db, table_name, row, conflict_strategy)
+                    if result == "imported":
+                        imported += 1
+                    elif result == "skipped":
+                        skipped += 1
+                    elif result == "overwritten":
+                        overwritten += 1
+                # 逐行提交，避免批量更新导致的唯一约束冲突
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                error_msg = f"Row {row}: {str(e)}"
+                errors.append(error_msg)
+                print(f"[IMPORT ERROR] {table_name}: {error_msg}")
 
-    db.commit()
+    # 打印导入结果摘要
+    print(f"[IMPORT SUMMARY] 表: {table_name}, 总计: {len(rows)}, 新导入: {imported}, 覆盖: {overwritten}, 跳过: {skipped}, 错误: {len(errors)}")
+    if errors:
+        print(f"[IMPORT ERRORS] {table_name} 错误详情:")
+        for i, error in enumerate(errors[:10]):  # 只打印前10个错误
+            print(f"  [{i+1}] {error}")
+        if len(errors) > 10:
+            print(f"  ... 还有 {len(errors) - 10} 个错误")
 
     return {
         "success": len(errors) == 0,
@@ -1373,6 +1899,57 @@ def _import_asset_record_row(db: Session, row: Dict, conflict_strategy: str) -> 
         处理结果: imported/skipped/overwritten
     """
     from datetime import datetime
+    from sqlalchemy import select
+    from models import LiquidityRating, FundType, Account, AssetOwner
+
+    # 刷新会话，确保能看到其他会话提交的数据
+    db.expire_all()
+
+    # 检查外键引用的记录是否存在
+    liquidity_rating_id = row.get("liquidity_rating_id")
+    fund_type_id = row.get("fund_type_id")
+    account_id = row.get("account_id")
+    owner_id = row.get("owner_id")
+
+    missing_refs = []
+    
+    print(f"[IMPORT DEBUG] 检查 asset_records 外键: asset_name={row.get('asset_name')}, liquidity_rating_id={liquidity_rating_id}, fund_type_id={fund_type_id}, account_id={account_id}, owner_id={owner_id}")
+    
+    if liquidity_rating_id is not None:
+        lr = db.execute(select(LiquidityRating).where(LiquidityRating.id == liquidity_rating_id)).scalar_one_or_none()
+        if not lr:
+            missing_refs.append(f"liquidity_rating_id={liquidity_rating_id}")
+            print(f"[IMPORT DEBUG]   -> liquidity_rating_id={liquidity_rating_id} 不存在")
+        else:
+            print(f"[IMPORT DEBUG]   -> liquidity_rating_id={liquidity_rating_id} 存在")
+    
+    if fund_type_id is not None:
+        ft = db.execute(select(FundType).where(FundType.id == fund_type_id)).scalar_one_or_none()
+        if not ft:
+            missing_refs.append(f"fund_type_id={fund_type_id}")
+            print(f"[IMPORT DEBUG]   -> fund_type_id={fund_type_id} 不存在")
+        else:
+            print(f"[IMPORT DEBUG]   -> fund_type_id={fund_type_id} 存在")
+    
+    if account_id is not None:
+        acc = db.execute(select(Account).where(Account.id == account_id)).scalar_one_or_none()
+        if not acc:
+            missing_refs.append(f"account_id={account_id}")
+            print(f"[IMPORT DEBUG]   -> account_id={account_id} 不存在")
+        else:
+            print(f"[IMPORT DEBUG]   -> account_id={account_id} 存在")
+    
+    if owner_id is not None:
+        ao = db.execute(select(AssetOwner).where(AssetOwner.id == owner_id)).scalar_one_or_none()
+        if not ao:
+            missing_refs.append(f"owner_id={owner_id}")
+            print(f"[IMPORT DEBUG]   -> owner_id={owner_id} 不存在")
+        else:
+            print(f"[IMPORT DEBUG]   -> owner_id={owner_id} 存在")
+    
+    if missing_refs:
+        print(f"[IMPORT ERROR] asset_records 外键引用不存在: {', '.join(missing_refs)}, asset_name={row.get('asset_name')}")
+        raise ValueError(f"外键引用不存在: {', '.join(missing_refs)}")
 
     # 检查是否存在冲突 - 支持 date 和 asset_date 两种字段名
     date_value = row.get("date") or row.get("asset_date")
@@ -1388,6 +1965,9 @@ def _import_asset_record_row(db: Session, row: Dict, conflict_strategy: str) -> 
             # 更新现有记录
             for key, value in row.items():
                 if hasattr(existing, key) and key != "id":
+                    # 将 import_batch_id 设置为 None，因为导入的批次记录可能不存在
+                    if key == "import_batch_id":
+                        value = None
                     # 转换日期字符串为 date 对象
                     if key in ["asset_date", "date"] and isinstance(value, str):
                         try:
@@ -1413,6 +1993,9 @@ def _import_asset_record_row(db: Session, row: Dict, conflict_strategy: str) -> 
 
     # 创建新记录 - 转换日期字段
     record_data = {k: v for k, v in row.items() if k != "id"}
+    # 将 import_batch_id 设置为 None，因为导入的批次记录可能不存在
+    if "import_batch_id" in record_data:
+        record_data["import_batch_id"] = None
     # 转换 asset_date
     if "asset_date" in record_data and isinstance(record_data["asset_date"], str):
         try:
@@ -1444,87 +2027,415 @@ def _import_generic_row(db: Session, table_name: str, row: Dict, conflict_strate
         处理结果: imported/skipped/overwritten
     """
     from sqlalchemy import select
-    from models import Account, FundType, LiquidityRating, AssetOwner
+    from models import Account, FundType, LiquidityRating, AssetOwner, AlertRule, AutoExportRule, AllocationTarget
 
     # 根据表名获取模型和主键字段
+    # 注意：被其他表作为外键引用的表（accounts, fund_types, liquidity_ratings, asset_owners）
+    # 必须使用 "id" 作为唯一字段，以保留原始 ID，确保外键关联正确
     model_map = {
-        "accounts": (Account, "name"),
-        "fund_types": (FundType, "name"),
-        "liquidity_ratings": (LiquidityRating, "name"),
-        "asset_owners": (AssetOwner, "name"),
+        "accounts": (Account, "id"),  # 被 asset_records.account_id 引用
+        "fund_types": (FundType, "id"),  # 被 asset_records.fund_type_id 引用
+        "liquidity_ratings": (LiquidityRating, "id"),  # 被 asset_records.liquidity_rating_id 引用
+        "asset_owners": (AssetOwner, "id"),  # 被 asset_records.owner_id 引用
+        "alert_rules": (AlertRule, "id"),
+        "auto_export_rules": (AutoExportRule, "id"),
+        "allocation_targets": (AllocationTarget, "id"),
     }
 
     if table_name not in model_map:
-        # 对于不支持的表，直接插入
-        return "imported"
+        # 对于不支持的表，直接返回失败
+        print(f"[IMPORT ERROR] 不支持的表: {table_name}")
+        return "skipped"
 
     model, unique_field = model_map[table_name]
 
-    # 检查是否存在冲突（基于唯一字段）
-    unique_value = row.get(unique_field)
-    if unique_value:
+    # 检查是否存在冲突
+    # 对于配置表（accounts, fund_types等），同时检查 id 和 name
+    existing = None
+    row_id = row.get("id")
+    row_name = row.get("name")
+    
+    # 首先基于 id 检查
+    if row_id is not None:
         existing = db.execute(
-            select(model).where(getattr(model, unique_field) == unique_value)
+            select(model).where(model.id == row_id)
+        ).scalar_one_or_none()
+    
+    # 如果 id 没有冲突，再基于 name 检查（对于有 name 字段的表）
+    if existing is None and row_name is not None and hasattr(model, 'name'):
+        existing = db.execute(
+            select(model).where(model.name == row_name)
         ).scalar_one_or_none()
 
-        if existing:
-            if conflict_strategy == "skip":
-                return "skipped"
-            elif conflict_strategy == "overwrite":
-                # 更新现有记录
-                try:
-                    for key, value in row.items():
-                        if key != "id" and hasattr(existing, key):
-                            # 处理日期时间字段
-                            if key in ["created_at", "updated_at"] and value:
-                                try:
-                                    from datetime import datetime
-                                    if isinstance(value, str):
-                                        # 尝试解析 ISO 格式日期
-                                        value = datetime.fromisoformat(value.replace('Z', '+00:00'))
-                                except Exception:
-                                    pass  # 如果解析失败，保持原值
-                            setattr(existing, key, value)
-                    return "overwritten"
-                except Exception as e:
-                    print(f"Error overwriting record: {e}")
-                    raise
-            elif conflict_strategy == "merge":
-                # 合并逻辑：对于配置表，合并等同于覆盖
-                try:
-                    for key, value in row.items():
-                        if key != "id" and hasattr(existing, key):
-                            # 处理日期时间字段
-                            if key in ["created_at", "updated_at"] and value:
-                                try:
-                                    from datetime import datetime
-                                    if isinstance(value, str):
-                                        value = datetime.fromisoformat(value.replace('Z', '+00:00'))
-                                except Exception:
-                                    pass
-                            setattr(existing, key, value)
-                    return "overwritten"
-                except Exception as e:
-                    print(f"Error merging record: {e}")
-                    raise
+    if existing:
+        if conflict_strategy == "skip":
+            return "skipped"
+        elif conflict_strategy == "overwrite":
+            # 更新现有记录
+            try:
+                datetime_fields = ["created_at", "updated_at", "last_run_at", "next_run_at", "export_time"]
+                
+                # 检查更新后的名称是否会导致唯一约束冲突
+                if 'name' in row and hasattr(model, 'name'):
+                    new_name = row['name']
+                    if new_name != existing.name:
+                        # 检查新名称是否被其他记录使用
+                        name_conflict = db.execute(
+                            select(model).where(model.name == new_name, model.id != existing.id)
+                        ).scalar_one_or_none()
+                        if name_conflict:
+                            # 名称已被其他记录使用，跳过更新
+                            print(f"[IMPORT WARNING] {table_name}: 名称 '{new_name}' 已被记录(id={name_conflict.id})使用，跳过更新")
+                            return "skipped"
+                
+                for key, value in row.items():
+                    if hasattr(existing, key) and key != 'id':
+                        # 将空字符串转换为 None（用于外键字段）
+                        if value == '':
+                            value = None
+                        # 处理布尔值字段
+                        if key == "is_active" and isinstance(value, str):
+                            value = value.lower() == 'true'
+                        # 处理日期时间字段
+                        if key in datetime_fields and value:
+                            try:
+                                from datetime import datetime
+                                if isinstance(value, str):
+                                    # 尝试解析 ISO 格式日期
+                                    value = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                            except Exception:
+                                pass  # 如果解析失败，保持原值
+                        setattr(existing, key, value)
+                # 立即刷新，避免批量更新导致的唯一约束冲突
+                db.flush()
+                return "overwritten"
+            except Exception as e:
+                print(f"Error overwriting record: {e}")
+                raise
+        elif conflict_strategy == "merge":
+            # 合并逻辑：对于配置表，合并等同于覆盖
+            try:
+                datetime_fields = ["created_at", "updated_at", "last_run_at", "next_run_at", "export_time"]
+                
+                # 检查更新后的名称是否会导致唯一约束冲突
+                if 'name' in row and hasattr(model, 'name'):
+                    new_name = row['name']
+                    if new_name != existing.name:
+                        # 检查新名称是否被其他记录使用
+                        name_conflict = db.execute(
+                            select(model).where(model.name == new_name, model.id != existing.id)
+                        ).scalar_one_or_none()
+                        if name_conflict:
+                            # 名称已被其他记录使用，跳过更新
+                            print(f"[IMPORT WARNING] {table_name}: 名称 '{new_name}' 已被记录(id={name_conflict.id})使用，跳过更新")
+                            return "skipped"
+                
+                for key, value in row.items():
+                    if hasattr(existing, key) and key != 'id':
+                        # 将空字符串转换为 None（用于外键字段）
+                        if value == '':
+                            value = None
+                        # 处理布尔值字段
+                        if key == "is_active" and isinstance(value, str):
+                            value = value.lower() == 'true'
+                        # 处理日期时间字段
+                        if key in datetime_fields and value:
+                            try:
+                                from datetime import datetime
+                                if isinstance(value, str):
+                                    value = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                            except Exception:
+                                pass
+                        setattr(existing, key, value)
+                # 立即刷新，避免批量更新导致的唯一约束冲突
+                db.flush()
+                return "overwritten"
+            except Exception as e:
+                print(f"Error merging record: {e}")
+                raise
 
     # 创建新记录
     try:
         record_data = {}
         for k, v in row.items():
-            if k != "id":
-                # 处理日期时间字段
-                if k in ["created_at", "updated_at"] and v:
-                    try:
-                        from datetime import datetime
-                        if isinstance(v, str):
-                            v = datetime.fromisoformat(v.replace('Z', '+00:00'))
-                    except Exception:
-                        pass
-                record_data[k] = v
+            # 将空字符串转换为 None（用于外键字段）
+            if v == '':
+                v = None
+            # 处理布尔值字段
+            if k == "is_active" and isinstance(v, str):
+                v = v.lower() == 'true'
+            # 处理日期时间字段
+            datetime_fields = ["created_at", "updated_at", "last_run_at", "next_run_at", "export_time"]
+            if k in datetime_fields and v:
+                try:
+                    from datetime import datetime
+                    if isinstance(v, str):
+                        v = datetime.fromisoformat(v.replace('Z', '+00:00'))
+                except Exception:
+                    pass
+            record_data[k] = v
         new_record = model(**record_data)
         db.add(new_record)
+        # 立即刷新，避免批量更新导致的唯一约束冲突
+        db.flush()
         return "imported"
     except Exception as e:
         print(f"Error creating record: {e}, data: {record_data}")
         raise
+
+
+def _import_fund_type_row(db: Session, row: Dict, conflict_strategy: str, id_mapping: Dict[int, int]) -> tuple:
+    """导入 fund_types 单行数据，直接保留原始 ID
+
+    Args:
+        db: 数据库会话
+        row: 行数据
+        conflict_strategy: 冲突处理策略
+        id_mapping: 旧 ID 到新 ID 的映射字典（为保持接口一致，实际不使用）
+
+    Returns:
+        (处理结果, 旧 ID, 新 ID) 元组
+    """
+    from sqlalchemy import select
+    from models import FundType
+
+    old_id = row.get("id")
+
+    # 检查是否存在冲突（基于 id 字段）
+    existing_by_id = db.execute(
+        select(FundType).where(FundType.id == old_id)
+    ).scalar_one_or_none()
+
+    # 检查是否存在冲突（基于 name 字段）
+    name = row.get("name")
+    existing_by_name = db.execute(
+        select(FundType).where(FundType.name == name)
+    ).scalar_one_or_none()
+
+    # 如果 ID 冲突或 name 冲突
+    if existing_by_id or existing_by_name:
+        existing = existing_by_id or existing_by_name
+        if conflict_strategy == "skip":
+            return "skipped", old_id, existing.id
+        elif conflict_strategy == "overwrite":
+            # 更新现有记录
+            try:
+                for key, value in row.items():
+                    if hasattr(existing, key):
+                        # 将空字符串转换为 None（用于外键字段）
+                        if value == '':
+                            value = None
+                        # 处理日期时间字段
+                        if key in ["created_at", "updated_at"] and value:
+                            try:
+                                from datetime import datetime
+                                if isinstance(value, str):
+                                    value = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                            except Exception:
+                                pass
+                        setattr(existing, key, value)
+                # 立即刷新，避免批量更新导致的唯一约束冲突
+                db.flush()
+                return "overwritten", old_id, existing.id
+            except Exception as e:
+                print(f"Error overwriting fund_type: {e}")
+                raise
+        elif conflict_strategy == "merge":
+            # 合并逻辑：对于配置表，合并等同于覆盖
+            try:
+                for key, value in row.items():
+                    if hasattr(existing, key):
+                        # 将空字符串转换为 None（用于外键字段）
+                        if value == '':
+                            value = None
+                        # 处理日期时间字段
+                        if key in ["created_at", "updated_at"] and value:
+                            try:
+                                from datetime import datetime
+                                if isinstance(value, str):
+                                    value = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                            except Exception:
+                                pass
+                        setattr(existing, key, value)
+                # 立即刷新，避免批量更新导致的唯一约束冲突
+                db.flush()
+                return "overwritten", old_id, existing.id
+            except Exception as e:
+                print(f"Error merging fund_type: {e}")
+                raise
+
+    # 创建新记录，保留原始 ID
+    try:
+        record_data = {}
+        for k, v in row.items():
+            # 将空字符串转换为 None（用于外键字段）
+            if v == '':
+                v = None
+            # 处理日期时间字段
+            if k in ["created_at", "updated_at"] and v:
+                try:
+                    from datetime import datetime
+                    if isinstance(v, str):
+                        v = datetime.fromisoformat(v.replace('Z', '+00:00'))
+                except Exception:
+                    pass
+            record_data[k] = v
+
+        new_record = FundType(**record_data)
+        db.add(new_record)
+        db.flush()  # 立即执行插入
+
+        print(f"[IMPORT DEBUG] Created fund_type: id={old_id}, name={name}, parent_id={record_data.get('parent_id')}")
+        return "imported", old_id, old_id
+    except Exception as e:
+        print(f"Error creating fund_type: {e}, data: {record_data}")
+        raise
+
+
+def _import_asset_records_with_mapping(
+    source_db_path: str,
+    target_db: Session,
+    table_name: str,
+    conflict_strategy: str,
+    fk_mapper: ForeignKeyMapper
+) -> ImportResult:
+    """导入 asset_records 表，使用外键映射器重新映射外键ID
+
+    Args:
+        source_db_path: 源数据库文件路径
+        target_db: 目标数据库会话
+        table_name: 表名（应为 asset_records）
+        conflict_strategy: 冲突处理策略
+        fk_mapper: 外键映射器
+
+    Returns:
+        导入结果
+    """
+    result = ImportResult(table_name=table_name)
+
+    # 连接源数据库
+    source_conn = sqlite3.connect(source_db_path)
+    source_conn.row_factory = sqlite3.Row
+
+    try:
+        # 获取源表结构
+        source_structure = get_table_structure_sqlite(source_conn, table_name)
+
+        # 获取目标表结构
+        target_inspector = inspect(target_db.bind)
+        target_columns = target_inspector.get_columns(table_name)
+        target_col_names = {col["name"] for col in target_columns}
+
+        # 获取共同列
+        common_columns = [col for col in source_structure.columns.keys() if col in target_col_names]
+
+        if not common_columns:
+            result.errors.append("No common columns found between source and target tables")
+            return result
+
+        # 获取主键列
+        target_pk = target_inspector.get_pk_constraint(table_name)
+        target_pk_cols = set(target_pk.get("constrained_columns", []))
+
+        # 读取源表数据
+        cols_str = ", ".join(common_columns)
+        cursor = source_conn.execute(f"SELECT {cols_str} FROM {table_name}")
+        rows = cursor.fetchall()
+
+        result.total_rows = len(rows)
+
+        # 获取目标表的默认值
+        target_col_info = {col["name"]: col for col in target_columns}
+
+        for row in rows:
+            row_dict = dict(row)
+
+            # 处理缺失列的默认值
+            for col in target_col_names:
+                if col not in row_dict:
+                    col_info = target_col_info.get(col, {})
+                    default = col_info.get("default")
+                    if default is not None:
+                        row_dict[col] = default
+                    else:
+                        col_type = str(col_info.get("type", "")).upper()
+                        if "INT" in col_type or "NUMERIC" in col_type or "DECIMAL" in col_type or "FLOAT" in col_type:
+                            row_dict[col] = 0
+                        elif "BOOL" in col_type:
+                            row_dict[col] = False
+                        elif "DATE" in col_type or "TIME" in col_type:
+                            row_dict[col] = datetime.now()
+                        else:
+                            row_dict[col] = ""
+
+            # 检查是否有无法映射的外键
+            if fk_mapper.has_unmapped_foreign_keys(row_dict):
+                unmapped_fks = []
+                for fk_field, fk_config in ASSET_RECORDS_FOREIGN_KEYS.items():
+                    if fk_field in row_dict and row_dict[fk_field] is not None:
+                        source_id = row_dict[fk_field]
+                        table_name_fk = fk_config['table']
+                        if fk_mapper.is_unmapped(table_name_fk, source_id):
+                            unmapped_fks.append(f"{fk_field}={source_id}")
+                error_msg = f"外键无法映射: {', '.join(unmapped_fks)}, asset_name={row_dict.get('asset_name')}"
+                print(f"[IMPORT ERROR] {error_msg}")
+                result.errors.append(error_msg)
+                result.skipped_rows += 1
+                continue
+
+            # 重新映射外键
+            row_dict = fk_mapper.remap_asset_record_foreign_keys(row_dict)
+
+            # 检查主键冲突
+            has_conflict = False
+            if target_pk_cols:
+                conditions = []
+                params = {}
+                for col in target_pk_cols:
+                    if col in row_dict:
+                        conditions.append(f"{col} = :{col}")
+                        params[col] = row_dict[col]
+
+                if conditions:
+                    where_clause = " AND ".join(conditions)
+                    query = text(f"SELECT * FROM {table_name} WHERE {where_clause}")
+                    existing = target_db.execute(query, params).fetchone()
+                    has_conflict = existing is not None
+
+            try:
+                if has_conflict:
+                    if conflict_strategy == "skip":
+                        result.skipped_rows += 1
+                        continue
+                    elif conflict_strategy == "overwrite":
+                        # 更新现有记录
+                        update_cols = [col for col in common_columns if col not in target_pk_cols]
+                        if update_cols:
+                            set_clause = ", ".join([f"{col} = :{col}" for col in update_cols])
+                            where_clause = " AND ".join([f"{col} = :pk_{col}" for col in target_pk_cols if col in row_dict])
+
+                            update_params = {col: row_dict[col] for col in update_cols}
+                            for col in target_pk_cols:
+                                if col in row_dict:
+                                    update_params[f"pk_{col}"] = row_dict[col]
+
+                            query = text(f"UPDATE {table_name} SET {set_clause} WHERE {where_clause}")
+                            target_db.execute(query, update_params)
+                            result.overwritten_rows += 1
+                else:
+                    # 插入新记录
+                    cols = list(row_dict.keys())
+                    placeholders = [f":{col}" for col in cols]
+
+                    insert_query = text(f"INSERT INTO {table_name} ({', '.join(cols)}) VALUES ({', '.join(placeholders)})")
+                    target_db.execute(insert_query, row_dict)
+                    result.imported_rows += 1
+
+            except Exception as e:
+                result.errors.append(f"Error importing row: {str(e)}")
+
+        target_db.commit()
+        return result
+
+    finally:
+        source_conn.close()
