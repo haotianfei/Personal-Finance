@@ -94,7 +94,7 @@ export default function AlertImportExportPage() {
       const content = await file.text()
       fileContentRef.current = content
       
-      const response = await fetch('http://localhost:8000/api/alerts/import/preview', {
+      const response = await fetch('/api/alerts/import/preview', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -157,7 +157,7 @@ export default function AlertImportExportPage() {
       formData.append('file', blob, fileList[0].name)
       formData.append('conflict_strategy', conflictStrategy)
 
-      const response = await fetch('http://localhost:8000/api/alerts/import/execute', {
+      const response = await fetch('/api/alerts/import/execute', {
         method: 'POST',
         body: formData,
       })

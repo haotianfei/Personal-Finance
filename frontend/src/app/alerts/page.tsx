@@ -559,7 +559,7 @@ export default function AlertsPage() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => window.open('http://localhost:8000/api/alerts/export', '_blank')}
+            onClick={() => window.open('/api/alerts/export', '_blank')}
             className="flex items-center gap-2 px-4 py-2 text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
           >
             <Download size={18} />

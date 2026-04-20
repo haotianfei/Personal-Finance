@@ -76,7 +76,7 @@ export default function BackupRestorePage() {
   const loadBackups = async () => {
     setLoading(true)
     try {
-      const response = await fetch('http://localhost:8000/api/backup/list')
+      const response = await fetch('/api/backup/list')
       const data: BackupResponse = await response.json()
       if (data.success && data.backups) {
         setBackups(data.backups)
@@ -140,7 +140,7 @@ export default function BackupRestorePage() {
       console.log(`Applying retention policy: deleting ${backupsToDelete.length} old backups`)
       for (const backup of backupsToDelete) {
         try {
-          await fetch(`http://localhost:8000/api/backup/delete/${backup.filename}`, {
+          await fetch(`/api/backup/delete/${backup.filename}`, {
             method: 'DELETE'
           })
         } catch (error) {
@@ -156,7 +156,7 @@ export default function BackupRestorePage() {
   const handleCreateBackup = async () => {
     setCreating(true)
     try {
-      const response = await fetch('http://localhost:8000/api/backup/create', {
+      const response = await fetch('/api/backup/create', {
         method: 'POST'
       })
       const data: BackupResponse = await response.json()
@@ -164,7 +164,7 @@ export default function BackupRestorePage() {
         message.success('备份创建成功')
         await loadBackups()
         // 应用保留策略
-        const updatedResponse = await fetch('http://localhost:8000/api/backup/list')
+        const updatedResponse = await fetch('/api/backup/list')
         const updatedData = await updatedResponse.json()
         if (updatedData.success && updatedData.backups) {
           applyRetentionPolicy(updatedData.backups)
@@ -182,7 +182,7 @@ export default function BackupRestorePage() {
 
   // 下载备份
   const handleDownload = (filename: string) => {
-    window.open(`http://localhost:8000/api/backup/download/${filename}`, '_blank')
+    window.open(`/api/backup/download/${filename}`, '_blank')
   }
 
   // 删除备份
@@ -195,7 +195,7 @@ export default function BackupRestorePage() {
       cancelText: '取消',
       onOk: async () => {
         try {
-          const response = await fetch(`http://localhost:8000/api/backup/delete/${filename}`, {
+          const response = await fetch(`/api/backup/delete/${filename}`, {
             method: 'DELETE'
           })
           const data: BackupResponse = await response.json()
@@ -228,7 +228,7 @@ export default function BackupRestorePage() {
       const formData = new FormData()
       formData.append('filename', selectedBackup.filename)
 
-      const response = await fetch('http://localhost:8000/api/backup/restore', {
+      const response = await fetch('/api/backup/restore', {
         method: 'POST',
         body: formData
       })
@@ -240,7 +240,7 @@ export default function BackupRestorePage() {
         // 恢复成功后刷新备份列表（恢复操作会创建回滚备份）
         await loadBackups()
         // 应用保留策略
-        const updatedResponse = await fetch('http://localhost:8000/api/backup/list')
+        const updatedResponse = await fetch('/api/backup/list')
         const updatedData = await updatedResponse.json()
         if (updatedData.success && updatedData.backups) {
           applyRetentionPolicy(updatedData.backups)
@@ -274,7 +274,7 @@ export default function BackupRestorePage() {
       const formData = new FormData()
       formData.append('file', file.originFileObj)
 
-      const response = await fetch('http://localhost:8000/api/backup/restore', {
+      const response = await fetch('/api/backup/restore', {
         method: 'POST',
         body: formData
       })
@@ -286,7 +286,7 @@ export default function BackupRestorePage() {
         // 恢复成功后刷新备份列表（恢复操作会创建回滚备份）
         await loadBackups()
         // 应用保留策略
-        const updatedResponse = await fetch('http://localhost:8000/api/backup/list')
+        const updatedResponse = await fetch('/api/backup/list')
         const updatedData = await updatedResponse.json()
         if (updatedData.success && updatedData.backups) {
           applyRetentionPolicy(updatedData.backups)
