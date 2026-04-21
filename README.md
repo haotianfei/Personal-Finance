@@ -14,6 +14,10 @@
   <b>一个功能完善的个人资产管理平台，支持多维度分析、资产配置、预警提醒、智能数据迁移等功能</b>
 </p>
 
+<p align="center">
+  <a href="./README_EN.md">English</a> | 简体中文
+</p>
+
 ---
 
 ## 📋 目录
@@ -34,41 +38,41 @@
 
 ### 资产总览
 <p align="center">
-  <img src="./images/Collage_20260410_110159.jpg" width="80%" alt="资产总览">
+  <img src="images/index.png" width="80%" alt="资产总览">
 </p>
 
 ### 多维度分析
 <p align="center">
-  <img src="./images/Collage_20260410_110218.jpg" width="80%" alt="多维度分析">
+  <img src="images/analysis.png" width="40%" alt="多维度分析">
+  <img src="images/analysis2.png" width="40%" alt="多维度分析">
 </p>
 
 ### 资产配置
 <p align="center">
-  <img src="./images/Collage_20260410_110503.jpg" width="80%" alt="资产配置">
+  <img src="images/allocation1.png" width="40%" alt="资产配置">
+  <img src="images/allocation2.png" width="40%" alt="资产配置">
 </p>
 
 ### 预警系统
 <p align="center">
-  <img src="./images/Collage_20260410_110518.jpg" width="80%" alt="预警系统">
+  <img src="images/alerts.png" width="80%" alt="预警系统">
 </p>
 
 ### 数据导出与历史记录
 <p align="center">
-  <img src="./images/backup-export1.png" width="80%" alt="数据导出">
-</p>
+<img src="./images/export.png" width="40%" alt="数据导出">
+<img src="./images/export-rules.png" width="40%" alt="数据导出规则"></p>
 <p align="center">
   <em>支持手动导出、自动导出规则配置，以及完整的导出历史记录追踪</em>
 </p>
 
-
-### 数据导入（智能迁移）
+### 数据备份与恢复
 <p align="center">
-  <img src="./images/backup-import1.png" width="80%" alt="数据导入">
+  <img src="images/backup-restore.png" width="80%" alt="数据导入">
 </p>
 <p align="center">
-  <em>支持从旧数据库选择性导入，自动检测表结构差异，提供冲突解决策略</em>
+  <em>支持从旧数据库导入</em>
 </p>
-
 
 ### 资产记录（ProTable 高级查询）
 <p align="center">
@@ -78,7 +82,6 @@
   <em>ProTable 高级查询表单，支持多条件组合筛选、金额区间、日期范围、多选过滤</em>
 </p>
 
-
 ### 资产拥有人管理
 <p align="center">
   <img src="./images/assets-owner.png" width="80%" alt="资产拥有人管理">
@@ -87,7 +90,6 @@
   <em>支持多成员资产管理，按拥有人筛选和统计，适合家庭财务管理</em>
 </p>
 
-
 ### 复制上期记录
 <p align="center">
   <img src="./images/records-copy.png" width="80%" alt="复制上期记录">
@@ -95,7 +97,6 @@
 <p align="center">
   <em>快速复制上期记录，支持表格排序和金额编辑，提升记账效率</em>
 </p>
-
 
 ---
 
@@ -108,24 +109,28 @@
 | 📊 **资产记录管理** | 支持资产的增删改查、批量操作、高级查询（多条件组合筛选）、数据导入导出 |
 | 📈 **多维度分析** | 支持按资产类型、流动性评级、账户、资产拥有人等维度进行趋势分析 |
 | 🎯 **资产配置** | 智能资产配置目标设置，偏离分析与调整建议 |
-| ⚠️ **预警系统** | 自定义预警规则，实时监控资产变动 |
+| ⚠️ **预警系统** | 自定义预警规则，实时监控资产变动，支持规则导入导出 |
 | 📉 **占比分析** | 可视化展示各类资产占比，支持多层级钻取 |
-| 📅 **账期管理** | 灵活的账期切换，支持日/月/季度/年度视图 |
-| 💾 **数据备份与导入** | 智能数据迁移，支持选择性导入、结构差异自动处理、冲突解决策略 |
+| 📅 **账期管理** | 灵活的账期切换，支持日/周/月/季度/年度视图 |
+| 💾 **数据备份与恢复** | 完整数据库备份与恢复，支持 .db 格式文件 |
+| 📥 **数据导入导出** | 智能数据迁移，支持 CSV/JSON 格式，选择性导入、结构差异自动处理 |
 | 📜 **导出历史** | 记录所有导出操作，支持查看和追踪数据变更 |
 | 👤 **资产拥有人管理** | 支持多成员资产管理，按拥有人筛选和统计 |
+| 🔄 **复制上期** | 快速复制上期资产记录，支持排序和金额编辑 |
+| ⏰ **自动导出** | 支持 Cron 表达式配置定时自动导出任务 |
 
 ### 特色功能
 
 - **智能导入**: 支持 CSV/JSON/DB 文件导入，自动识别字段映射，处理结构差异
-- **导入备份**: 每次导入前自动备份数据，防止数据丢失
-- **数据导出**: 支持手动导出和自动导出，可配置 Cron 表达式定时备份
+- **导入预览**: 导入前预览数据，自动检测冲突，提供跳过/覆盖策略
+- **数据备份**: 每次导入前自动备份数据，防止数据丢失
 - **导出历史**: 记录所有导出操作，区分手动导出和自动导出
+- **自动导出**: 支持 Cron 表达式定时备份，可配置文件名模板
 - **数据快照**: 自动保存历史数据，支持任意时间点回溯
 - **高级查询**: ProTable 高级查询表单，支持多条件组合筛选、金额区间、日期范围
 - **批量操作**: 支持批量更新、批量删除，提升操作效率
 - **批量修改历史**: 支持批量修改单个资产的所有历史记录属性
-- **复制上期**: 快速复制上期记录，支持排序和金额编辑
+- **预警规则导入导出**: 支持预警规则的 JSON 格式导入导出
 - **自动数据库迁移**: 应用启动时自动检测并更新数据库结构
 - **响应式设计**: 完美适配桌面端和移动端
 - **实时计算**: 资产变动实时计算，即时反馈
@@ -142,7 +147,7 @@
 | [SQLAlchemy](https://www.sqlalchemy.org/) | 2.0.35 | ORM 数据库操作 |
 | [Pydantic](https://docs.pydantic.dev/) | 2.9.2 | 数据验证与序列化 |
 | [Uvicorn](https://www.uvicorn.org/) | 0.30.6 | ASGI 服务器 |
-| [APScheduler](https://apscheduler.readthedocs.io/) | 3.10.0 | 定时任务调度 |
+| [APScheduler](https://apscheduler.readthedocs.io/) | 3.10.0+ | 定时任务调度 |
 | [croniter](https://github.com/kiorky/croniter) | 1.3.0+ | Cron 表达式解析 |
 | [SQLite](https://www.sqlite.org/) | - | 轻量级数据库 |
 
@@ -157,6 +162,8 @@
 | [Tailwind CSS](https://tailwindcss.com/) | 3.4.17 | 原子化 CSS |
 | [ECharts](https://echarts.apache.org/) | 5.5.1 | 数据可视化 |
 | [TanStack Query](https://tanstack.com/query) | 5.62.0 | 数据获取与缓存 |
+| [date-fns](https://date-fns.org/) | 4.1.0 | 日期处理 |
+| [Lucide React](https://lucide.dev/) | 0.468.0 | 图标库 |
 
 ---
 
@@ -174,7 +181,7 @@
 
 ```bash
 # 克隆项目
-git clone https://github.com/yourusername/person_fin.git
+git clone https://github.com/haotianfei/Personal-Finance.git
 cd person_fin
 
 # 启动服务
@@ -185,7 +192,7 @@ cd person_fin
 
 ```powershell
 # 克隆项目
-git clone https://github.com/yourusername/person_fin.git
+git clone https://github.com/haotianfei/Personal-Finance.git
 cd person_fin
 
 # 启动服务（管理员权限）
@@ -265,6 +272,7 @@ person_fin/
 │   │   ├── 📄 export_history.py # 导出历史 API
 │   │   ├── 📄 allocations.py  # 资产配置 API
 │   │   ├── 📄 alerts.py       # 预警系统 API
+│   │   ├── 📄 backup.py       # 备份恢复 API
 │   │   └── 📄 ...
 │   ├── 📂 services/           # 业务逻辑
 │   │   ├── 📄 backup_service.py      # 数据备份服务
@@ -273,6 +281,7 @@ person_fin/
 │   │   ├── 📄 export_service.py      # 数据导出服务
 │   │   ├── 📄 import_service.py      # 数据导入服务
 │   │   ├── 📄 db_migration_service.py # 数据库迁移服务
+│   │   ├── 📄 alert_service.py       # 预警服务
 │   │   └── 📄 asset_service.py       # 资产记录服务
 │   ├── 📄 main.py             # 应用入口
 │   ├── 📄 database.py         # 数据库配置
@@ -285,11 +294,11 @@ person_fin/
 │   ├── 📂 src/
 │   │   ├── 📂 app/           # Next.js 页面
 │   │   │   ├── 📄 records/   # 资产记录页面（ProTable）
-│   │   │   ├── 📄 settings/backup-import/ # 数据备份导入页面
+│   │   │   ├── 📄 alerts/    # 资产预警页面
+│   │   │   ├── 📄 settings/backup-restore/ # 数据备份恢复页面
 │   │   │   └── 📄 ...
 │   │   ├── 📂 components/    # React 组件
-│   │   ├── 📂 hooks/         # 自定义 Hooks
-│   │   ├── 📂 lib/           # 工具函数
+│   │   ├── 📂 lib/           # 工具函数和 API
 │   │   └── 📂 types/         # TypeScript 类型
 │   ├── 📄 package.json       # Node.js 依赖
 │   ├── 📄 next.config.js     # Next.js 配置
@@ -297,15 +306,15 @@ person_fin/
 │
 ├── 📂 data/                   # 数据文件（SQLite）
 │   ├── 📂 backup/            # 导入备份目录
-│   └── 📂 auto-export/       # 自动导出目录
-├── 📂 import/                 # 导入文件目录
-├── 📂 .trae/specs/           # 功能规格文档
+│   ├── 📂 auto-export/       # 自动导出目录
+│   └── 📂 exports/           # 导出文件目录
+├── 📂 images/                 # 项目截图
+├── 📂 wiki/                   # GitHub Wiki 文档
 ├── 📄 docker-compose.yml      # Docker 编排配置
 ├── 📄 person_fin.sh          # Linux/macOS 启动脚本
 ├── 📄 person_fin.ps1         # Windows 启动脚本
-├── 📄 push-to-github.sh      # GitHub 推送脚本
-├── 📄 backup-and-restore.sh  # 数据备份恢复脚本
 ├── 📄 DEPLOYMENT.md          # 部署文档
+├── 📄 TODO.md                # 功能开发计划
 └── 📄 README.md              # 项目说明
 ```
 
@@ -403,9 +412,11 @@ copies or substantial portions of the Software.
 
 ### 新增功能
 
-- **数据备份与导入**: 支持从旧数据库选择性导入，自动处理结构差异
+- **数据备份与恢复**: 支持完整数据库备份与恢复，.db 格式
+- **数据导入导出**: 支持 CSV/JSON 格式，智能字段映射
 - **资产拥有人管理**: 支持多成员资产管理
 - **ProTable 高级查询**: 多条件组合筛选、金额区间、日期范围
+- **预警规则导入导出**: 支持 JSON 格式导入导出
 - **自动数据库迁移**: 应用启动时自动更新数据库结构
 - **复制上期记录**: 支持排序和金额编辑
 
@@ -414,6 +425,7 @@ copies or substantial portions of the Software.
 - 升级 Ant Design 到 v6
 - 集成 ProComponents 高级组件
 - 优化 Docker 构建流程
+- 修复 Docker 环境下 API 请求问题
 
 ---
 
