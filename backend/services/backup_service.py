@@ -44,9 +44,9 @@ def create_backup_before_import(import_filename: str) -> str:
     backup_filename = f"backup_before_import_{clean_name}_{timestamp}.db"
     backup_path = os.path.join(BACKUP_DIR, backup_filename)
     
-    # 复制数据库文件
+    # 复制数据库文件（使用 copy 而不是 copy2，避免继承源文件时间戳）
     if os.path.exists(DB_PATH):
-        shutil.copy2(DB_PATH, backup_path)
+        shutil.copy(DB_PATH, backup_path)
         print(f"Backup created: {backup_path}")
         return backup_path
     else:
@@ -115,11 +115,12 @@ def create_full_backup() -> dict:
     backup_filename = f"backup_{timestamp}.db"
     backup_path = os.path.join(BACKUP_DIR, backup_filename)
 
-    # 复制数据库文件
+    # 检查数据库文件存在
     if not os.path.exists(DB_PATH):
         raise FileNotFoundError(f"数据库文件不存在: {DB_PATH}")
 
-    shutil.copy2(DB_PATH, backup_path)
+    # 复制数据库文件（使用 copy 而不是 copy2，避免继承源文件时间戳）
+    shutil.copy(DB_PATH, backup_path)
     print(f"完整备份已创建: {backup_path}")
 
     # 获取文件信息
@@ -188,7 +189,8 @@ def restore_database(source_path: str):
                 BACKUP_DIR,
                 f"rollback_before_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
             )
-            shutil.copy2(DB_PATH, rollback_path)
+            # 使用 copy 而不是 copy2，避免继承源文件时间戳
+            shutil.copy(DB_PATH, rollback_path)
             print(f"当前数据库已备份到: {rollback_path}")
 
         # 用备份文件替换当前数据库

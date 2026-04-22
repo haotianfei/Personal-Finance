@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 import Sidebar from '@/components/layout/Sidebar'
 import Providers from '@/components/layout/Providers'
+import Footer from '@/components/layout/Footer'
 
 export const metadata: Metadata = {
   title: '个人资产管理系统',
@@ -15,11 +16,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Providers>
           <div className="flex min-h-screen">
             <Sidebar />
-            <main className="flex-1 min-h-screen transition-all duration-200">
-              <div className="p-6 max-w-[1400px] mx-auto">
-                {children}
-              </div>
-            </main>
+            <div className="flex-1 flex flex-col min-h-screen transition-all duration-200">
+              <main className="flex-1">
+                <div className="p-6 max-w-[1400px] mx-auto">
+                  {children}
+                </div>
+              </main>
+              <Footer />
+            </div>
           </div>
         </Providers>
       </body>
