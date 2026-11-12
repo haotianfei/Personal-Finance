@@ -1,0 +1,59 @@
+# person_f staging（预发）编排 —— 生产镜像 + 在线库副本预演，与生产 person_fin 项目并存
+#
+# 用法（一律经 scripts/staging.sh，脚本内固定 -f + -p，杜绝误触生产项目）：
+#   bash scripts/staging-refresh.sh --apply     # 先从生产库取一致快照到 deploy-staging/data/
+#   bash scripts/staging.sh up | status | logs | down
+# 静态校验（不起容器）：
+#   sudo -n docker compose -f deploy/docker-compose.staging.yml -p person_fin_staging config
+#
+# 与生产 deploy/docker-compose.yml 的差异（有意为之，见 .scratch/env-tiers/issues/02-staging-environment.md）：
+#   1. 项目名 person_fin_staging、端口 6689/6688（后端尾 8 / 前端尾 9 的 staging 段）、
+#      数据目录 ../deploy-staging/data（不碰 deploy/data）；
+#   2. 库文件名不复用生产：/app/data/person_fin_staging.db → 后端启动日志 db_role=staging；
+#   3. restart: "no" —— 预演栈不随宿主/daemon 自启，避免残留进程内的定时任务；
+#   4. paddle 模型缓存用本项目自己的命名卷（person_fin_staging_paddle_cache），
+#      不与生产 person_fin_paddle_cache 共享写路径。
+# 镜像不在此构建：默认沿用 person_fin-backend:local / person_fin-frontend:local，
+# 可用 STAGING_BACKEND_IMAGE / STAGING_FRONTEND_IMAGE 指向 staging 专用 tag
+# （例如 staging-20261109，避免用生产镜像跑预演）。
+# healthcheck 不在此覆盖：与生产同源于镜像内 HEALTHCHECK
+# （backend 30s/5s/start-period 90s/retries 5，frontend 30s/5s/start-period 30s/retries 5）。
+name: person_fin_staging
+
+services:
+  backend:
+    # 镜像可覆盖：staging 专用 tag 走 STAGING_BACKEND_IMAGE（例如 staging-20261109），
+    # 默认 :local 只为不改变既有用法；scripts/staging.sh up 会在仍用 :local 时告警。
+    image: ${STAGING_BACKEND_IMAGE:-person_fin-backend:local}
+    init: true
+    restart: "no"
+    environment:
+      DATABASE_PATH: /app/data/person_fin_staging.db
+      TZ: Asia/Shanghai
+    volumes:
+      # 宿主机相对路径按本文件所在目录（deploy/）解析 → <repo>/deploy-staging/data
+      - ../deploy-staging/data:/app/data:z
+      - paddle_cache:/app/.paddlex
+    ports:
+      - "${STAGING_BACKEND_PORT:-6688}:8000"
+
+  frontend:
+    image: ${STAGING_FRONTEND_IMAGE:-person_fin-frontend:local}
+    init: true
+    restart: "no"
+    environment:
+      NEXT_PUBLIC_API_URL: http://backend:8000
+      TZ: Asia/Shanghai
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${STAGING_FRONTEND_PORT:-6689}:3000"
+
+volumes:
+  paddle_cache:
+
+networks:
+  # 显式命名，避免与生产 person_fin_default / 开发 person_fin_network 撞名
+  default:
+    name: person_fin_staging_network

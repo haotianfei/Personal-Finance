@@ -1,0 +1,25 @@
+{
+  "extends": [
+    "next/core-web-vitals",
+    "next/typescript"
+  ],
+  "rules": {
+    "no-restricted-imports": ["error", {
+      "patterns": [
+        { "group": ["echarts", "echarts/*", "echarts-for-react", "echarts-for-react/*"],
+          "message": "图表统一走 @/components/charts" },
+        { "group": ["@/components/charts/Chart", "@/components/charts/registry",
+                    "@/components/charts/presets/*", "@/components/charts/primitives/*"],
+          "message": "只从 @/components/charts 公共出口取 primitive" }
+      ]
+    }]
+  },
+  "overrides": [
+    {
+      "files": ["src/components/charts/**/*"],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
+    }
+  ]
+}

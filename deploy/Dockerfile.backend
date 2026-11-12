@@ -1,0 +1,46 @@
+# 生产后端镜像：FastAPI + SQLite（单 worker）
+# 构建上下文由 scripts/package.sh 暂存到 build/backend（不含 data/、venv、日志）
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Python 侧国内镜像（可用 --build-arg PIP_INDEX_URL= 覆盖）
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 运行期系统依赖（OCR/OpenCV 需要 libgomp/libgl）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgomp1 libgl1 libglib2.0-0 libsqlite3-0 libxext6 tzdata curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install -r requirements.txt -i "$PIP_INDEX_URL"
+
+# 代码放在 /app/backend（与仓库 backend/ 同构：多处 data/ 相对路径按"上溯"解析）
+COPY . /app/backend
+
+# 非 root 运行（uid 1000：宿主机数据目录需该 uid 可写）
+# 家目录取 /app：PaddleX 缓存解析 ~/.paddlex，容器内不再引入第二个家目录路径
+RUN useradd -u 1000 -d /app -s /usr/sbin/nologin app \
+    && mkdir -p /app/data
+ENV HOME=/app
+
+# 可选：随镜像携带 PaddleX 模型缓存（package.sh 保证 paddle_cache/ 存在，可为空）
+RUN mkdir -p /app/.paddlex
+COPY paddle_cache/ /app/.paddlex/
+
+RUN chown -R app:app /app
+
+WORKDIR /app/backend
+USER app
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=5 \
+    CMD curl -fsS http://127.0.0.1:8000/api/health || exit 1
+
+# SQLite 单写者 + 进程内调度/审计链 CAS：固定 1 worker，勿横向扩容
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

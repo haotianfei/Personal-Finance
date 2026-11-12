@@ -1,0 +1,5 @@
+# 构建上下文与运行时产物不入库
+build/
+data/
+backups/
+.env

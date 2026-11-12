@@ -1,0 +1,454 @@
+@import '~antd/dist/reset.css';
+@import '../styles/tokens.generated.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ==========================================================================
+ * 运行时变量（不承载设计决策）
+ * 设计 token 由 tokens.json 生成到 tokens.generated.css；这里只放安全区、
+ * 视口高度、粘性偏移与焦点环这类运行期/环境相关变量。
+ * ========================================================================== */
+:root {
+  --pf-safe-top: env(safe-area-inset-top, 0px);
+  --pf-safe-right: env(safe-area-inset-right, 0px);
+  --pf-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --pf-safe-left: env(safe-area-inset-left, 0px);
+
+  /* 顶栏 56 + 刘海；页面粘性偏移只读这一个变量，不再各页手写 calc */
+  --pf-header-h: calc(var(--pf-shell-topbar) + var(--pf-safe-top));
+  --pf-tabbar-h: calc(var(--pf-shell-tabbar) + var(--pf-safe-bottom));
+
+  --pf-focus-ring: var(--pf-focus-width) solid var(--pf-color-focus);
+
+  /* 冻结列边界线（spec D9）：复用 border.default 的别名，不新增颜色。
+     只读这一处 —— box-shadow 里出现色值时一律走 var(--pf-line)。 */
+  --pf-line: var(--pf-color-border-default);
+
+  /* dvh 兜底：不支持 dvh 的浏览器回落到 100vh（见 .pf-min-h-dvh） */
+  --pf-viewport-h: 100vh;
+}
+
+@supports (height: 100dvh) {
+  :root {
+    --pf-viewport-h: 100dvh;
+  }
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--pf-font-sans);
+  background: var(--pf-color-bg-app);
+  color: var(--pf-color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 数字：金额、比率、日期列统一等宽可扫读（design §3.3） */
+.pf-num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* ==========================================================================
+ * 表格最小公共层（spec D6/A13）
+ * 4 处原生表（records 批量修改弹窗、analysis 逐项明细、归集分析、import 预览）
+ * 就地套 .pf-table，与 DataTable 共用同一套列宽档位（tokens 的 table.col.*）。
+ * 这里只做布局与基线，**不写列宽** —— 列宽由 colgroup / th 读
+ * var(--pf-table-col-*) 给；写在这里就等于又开了第二个事实源。
+ *
+ * 注意（Tailwind JIT）：`@layer components` 里的自定义类按内容扫描**按需输出** ——
+ * 只有在 .tsx 里字面写出 `className="pf-table"` 才会生成这条规则，拼字符串（`pf-${x}`）
+ * 不会生成。票 02 在 4 处原生表上写死类名即可。
+ * ========================================================================== */
+@layer components {
+  .pf-table {
+    width: 100%;
+    table-layout: fixed;
+    /* D9：冻结列走 collapse + box-shadow。不得切 separate —— tr.border-b 与
+       tbody.divide-y 在 separate 下不再绘制，横分隔会静默消失。 */
+    border-collapse: collapse;
+    border-spacing: 0;
+    font-size: var(--pf-type-body-size);
+    line-height: var(--pf-type-body-line);
+  }
+
+  /*
+   * `:where()` 把这三条规则的特异性压到「一个类」(0,1,0)：单元格上的工具类
+   * （text-right / whitespace-normal / py-* / px-*）才能覆盖这里的基线。
+   * 不加 :where 时 `.pf-table > tbody > tr > td` 是 (0,1,4)，
+   * 会压住 `.whitespace-normal` (0,1,0) —— 允许换行的 text-mid/note 单元会静默变 nowrap。
+   */
+  .pf-table :where(tbody td, thead th, tfoot td) {
+    /* 数据域统一水平内边距 = table.cell-pad-x(40) 对半 —— 档值预算就是按 40 算的，
+       px-6(48) 会让每一档白丢 8px（spec C2）。 */
+    padding-inline: calc(var(--pf-table-cell-pad-x) / 2);
+    padding-block: 10px;
+    text-align: left;
+    vertical-align: middle;
+    /* nowrap 基线：允许换行的档（text-mid / note）由单元格自带 whitespace-normal 覆盖 */
+    white-space: nowrap;
+  }
+
+  .pf-table :where(thead th) {
+    font-size: var(--pf-type-meta-size);
+    line-height: var(--pf-type-meta-line);
+    font-weight: 500;
+    color: var(--pf-color-text-muted);
+  }
+
+  /* ---- 行底默认值：fail-safe。新增行不写类也不会漏字 ------------------------ */
+  /* `:where()` 必须留着，把特异性压到 (0,1,0)：否则 `bg-subtle` / `bg-brand-50`
+     这类同样 (0,1,0) 的工具类会被压死（与上面 .pf-table :where(td) 同一理由）。 */
+  .pf-table :where(tbody > tr) {
+    background-color: var(--pf-color-bg-surface);
+  }
+
+  .pf-table :where(thead) {
+    background-color: var(--pf-color-bg-subtle);
+  }
+
+  /* ---- 冻结列（spec D9/D10 + A7–A10）：背景跟随行色 -------------------------
+   * 三条禁令（动手改这里之前先读）：
+   *   1. 行背景**只准纯色** —— `inherit` 继承的是 `background` 简写，渐变/图片
+   *      会在冻结格上按单元格框重新绘制，出现错位；
+   *   2. 行上**不准 opacity**（与 D11 删 opacity-60 同一条红线）：冻结格 inherit
+   *      到的是已合成的颜色，行 opacity 会让冻结格一起半透，邻列文字照样透出；
+   *   3. 状态类（bg-amber-50 / bg-red-50 / bg-brand-50 …）**只准写在 tr 上**，
+   *      不准写在冻结 td/th 上 —— 冻结格写死底色会顶掉 inherit，行状态在冻结列上缺失。
+   */
+  .pf-table td.pf-col-first,
+  .pf-table td.pf-col-last {
+    position: sticky;
+    z-index: var(--pf-z-sticky-col);
+    background: inherit;
+  }
+
+  .pf-table .pf-col-first {
+    left: 0;
+    box-shadow: inset -1px 0 0 var(--pf-line);
+  }
+
+  .pf-table .pf-col-last {
+    right: 0;
+    box-shadow: inset 1px 0 0 var(--pf-line);
+  }
+
+  /* 表头冻结格：必须显式不透明，**不能** inherit —— th 的父 tr 若没有底色，
+     inherit 会拿到 transparent，横滚时邻列表头文字照样透出。z 取 20（表头优先）。 */
+  .pf-table thead th.pf-col-first,
+  .pf-table thead th.pf-col-last {
+    position: sticky;
+    z-index: var(--pf-z-sticky);
+    background: var(--pf-color-bg-subtle);
+  }
+}
+
+/* min-h-dvh 的安全兜底：先 100vh，后 100dvh */
+.pf-min-h-dvh {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.pf-h-dvh {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* 内容列：迁移到 PageContainer 的页面自己带 16/24/32 留白；
+   尚未迁移的页面由下面这条兜底规则给同样的留白，避免两套页面间距。 */
+.pf-main {
+  flex: 1;
+  width: 100%;
+  max-width: var(--pf-shell-content-max);
+  margin-inline: auto;
+  min-width: 0;
+  padding: 0;
+}
+
+.pf-main > :not([data-pf-page]) {
+  padding-left: calc(16px + var(--pf-safe-left));
+  padding-right: calc(16px + var(--pf-safe-right));
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+
+@media (min-width: 768px) {
+  .pf-main > :not([data-pf-page]) {
+    padding-left: calc(24px + var(--pf-safe-left));
+    padding-right: calc(24px + var(--pf-safe-right));
+    padding-top: 24px;
+    padding-bottom: 24px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .pf-main > :not([data-pf-page]) {
+    padding-left: calc(32px + var(--pf-safe-left));
+    padding-right: calc(32px + var(--pf-safe-right));
+    padding-top: 32px;
+    padding-bottom: 32px;
+  }
+}
+
+/* 页面容器上下留白；与左右一致按 16 / 24 / 32 收敛 */
+.pf-page-y {
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+
+@media (min-width: 768px) {
+  .pf-page-y {
+    padding-top: 24px;
+    padding-bottom: 24px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .pf-page-y {
+    padding-top: 32px;
+    padding-bottom: 32px;
+  }
+}
+
+/* 页面容器左右留白：16 / 24 / 32 + 横向安全区（design §2.4） */
+.pf-page-x {
+  padding-left: calc(16px + var(--pf-safe-left));
+  padding-right: calc(16px + var(--pf-safe-right));
+}
+
+@media (min-width: 768px) {
+  .pf-page-x {
+    padding-left: calc(24px + var(--pf-safe-left));
+    padding-right: calc(24px + var(--pf-safe-right));
+  }
+}
+
+@media (min-width: 1024px) {
+  .pf-page-x {
+    padding-left: calc(32px + var(--pf-safe-left));
+    padding-right: calc(32px + var(--pf-safe-right));
+  }
+}
+
+/* ==========================================================================
+ * 焦点：2px 环 + 2px offset；深色底用浅蓝（design §7.3）
+ * ========================================================================== */
+:where(a, button, input, select, textarea, summary, [tabindex]:not([tabindex='-1'])):focus-visible {
+  outline: var(--pf-focus-ring);
+  outline-offset: var(--pf-focus-offset);
+}
+
+.pf-on-dark :where(a, button, [tabindex]:not([tabindex='-1'])):focus-visible {
+  outline-color: var(--pf-color-brand-300);
+}
+
+.pf-skip-link {
+  position: fixed;
+  top: calc(8px + var(--pf-safe-top));
+  left: calc(8px + var(--pf-safe-left));
+  z-index: var(--pf-z-toast);
+  transform: translateY(calc(-100% - 16px));
+  border-radius: var(--pf-radius-control);
+  border: 1px solid var(--pf-color-border-strong);
+  background: var(--pf-color-bg-surface);
+  color: var(--pf-color-text-primary);
+  box-shadow: var(--pf-shadow-overlay);
+  display: inline-flex;
+  min-height: var(--pf-control-hit);
+  align-items: center;
+  padding: 10px 16px;
+  font-size: var(--pf-type-body-size);
+  line-height: var(--pf-type-body-line);
+  font-weight: 500;
+  transition: transform var(--pf-motion-fast) var(--pf-motion-easing);
+}
+
+.pf-skip-link:focus {
+  transform: translateY(0);
+}
+
+/* ==========================================================================
+ * 壳层导航：颜色/命中区；hover 只在细指针 + 支持 hover 的设备上增强
+ * ========================================================================== */
+.pf-nav-link {
+  display: flex;
+  min-height: var(--pf-control-hit);
+  align-items: center;
+  gap: 12px;
+  border-radius: var(--pf-radius-control);
+  padding: 8px 12px;
+  color: var(--pf-color-nav-idle);
+  font-size: var(--pf-type-body-size);
+  line-height: var(--pf-type-body-line);
+  font-weight: 500;
+  transition: background-color var(--pf-motion-fast) var(--pf-motion-easing),
+    color var(--pf-motion-fast) var(--pf-motion-easing);
+}
+
+.pf-nav-link[aria-current='page'] {
+  background: var(--pf-color-nav-active);
+  color: var(--pf-color-text-inverse);
+}
+
+/* 父级分区只做弱高亮；aria-current 仍只落在叶子 */
+.pf-nav-link[data-active='true'] {
+  background: rgb(255 255 255 / 0.07);
+  color: var(--pf-color-text-inverse);
+}
+
+.pf-nav-icon {
+  display: flex;
+  height: var(--pf-control-hit);
+  width: var(--pf-control-hit);
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--pf-radius-control);
+  color: var(--pf-color-nav-idle);
+  transition: background-color var(--pf-motion-fast) var(--pf-motion-easing),
+    color var(--pf-motion-fast) var(--pf-motion-easing);
+}
+
+.pf-nav-icon[aria-current='page'],
+.pf-nav-icon[data-active='true'] {
+  background: var(--pf-color-nav-active);
+  color: var(--pf-color-text-inverse);
+}
+
+.pf-nav-group-label {
+  padding: 12px 12px 4px;
+  color: var(--pf-color-nav-group);
+  font-size: var(--pf-type-meta-size);
+  line-height: var(--pf-type-meta-line);
+  font-weight: 500;
+}
+
+.pf-tool-btn {
+  display: flex;
+  height: var(--pf-control-hit);
+  width: var(--pf-control-hit);
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--pf-radius-control);
+  color: var(--pf-color-nav-idle);
+  transition: background-color var(--pf-motion-fast) var(--pf-motion-easing),
+    color var(--pf-motion-fast) var(--pf-motion-easing);
+}
+
+/* 卡片 hover 只做边框增强，不做位移/阴影堆叠 */
+.pf-card-interactive {
+  transition: border-color var(--pf-motion-fast) var(--pf-motion-easing),
+    background-color var(--pf-motion-fast) var(--pf-motion-easing);
+}
+
+.pf-subtle-link {
+  transition: color var(--pf-motion-fast) var(--pf-motion-easing);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .pf-nav-link:hover,
+  .pf-nav-icon:hover,
+  .pf-tool-btn:hover {
+    background: var(--pf-color-nav-hover);
+    color: var(--pf-color-text-inverse);
+  }
+
+  .pf-nav-link[aria-current='page']:hover,
+  .pf-nav-icon[aria-current='page']:hover,
+  .pf-nav-icon[data-active='true']:hover {
+    background: var(--pf-color-nav-active-hover);
+  }
+
+  .pf-nav-link[data-active='true']:hover {
+    background: rgb(255 255 255 / 0.1);
+  }
+
+  .pf-card-interactive:hover {
+    border-color: var(--pf-color-border-strong);
+  }
+
+  .pf-subtle-link:hover {
+    color: var(--pf-color-text-primary);
+  }
+}
+
+/* 滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--pf-color-border-strong);
+  border-radius: 9999px;
+}
+
+/* 导航外壳滚动区（侧栏 / 抽屉）：深色底上提亮滑块，并阻断滚动链 */
+.nav-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--pf-color-nav-scrollbar) transparent;
+  overscroll-behavior: contain;
+}
+.nav-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.nav-scroll::-webkit-scrollbar-thumb {
+  background: var(--pf-color-nav-scrollbar);
+  border-radius: 4px;
+}
+
+/* ==========================================================================
+ * 动效：只解释状态变化；页面级入场动画已移除
+ * ========================================================================== */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right var(--pf-motion-sheet) var(--pf-motion-easing);
+}
+
+/* reduced-motion：全站动画/过渡降级为瞬时（图表 canvas 另有冻结处理） */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+/* 触控设备上的 antd 小控件统一到 44px 命中（PeriodPicker 等局部容器）。 */
+@media (hover: none), (pointer: coarse) {
+  .pf-period-picker .ant-select-single { height: 44px; }
+  .pf-period-picker .ant-select-selector,
+  .pf-period-picker .ant-picker,
+  .pf-period-picker .ant-btn { min-width: 44px; min-height: 44px; }
+  .pf-period-picker .ant-select-selector { align-items: center; }
+}
+
+/* 图表时间窗口 chip：视觉仍按冻结图表层，只补足 44px 触控宽度。 */
+[aria-label='时间窗口'] button {
+  min-width: 44px;
+}
+
+/* 图表时间窗口 chip 非选中态：保证 AA（图表逻辑/配色冻结，仅提升文字对比）。 */
+[aria-label='时间窗口'] button:not([aria-pressed='true']) {
+  color: var(--pf-color-text-secondary);
+}

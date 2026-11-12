@@ -1,0 +1,43 @@
+# person_f 生产部署（单机 Docker Compose）
+# 用法：cp .env.example .env && ./scripts/deploy.sh
+name: person_fin
+
+services:
+  backend:
+    build:
+      context: ./build/backend
+      dockerfile: Dockerfile
+    image: person_fin-backend:local
+    init: true
+    restart: unless-stopped
+    environment:
+      DATABASE_PATH: /app/data/person_fin.db
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      # 数据卷：DB + evidence + backup + exports（SELinux 需 :z）
+      - ${DATA_DIR:-./data}:/app/data:z
+      # PaddleOCR/PaddleX 模型缓存（首次识别会下载，保留卷避免重复下载）
+      - paddle_cache:/app/.paddlex
+    ports:
+      - "${BACKEND_PORT:-6667}:8000"
+
+  frontend:
+    build:
+      context: ./build/frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://backend:8000}
+    image: person_fin-frontend:local
+    init: true
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://backend:8000}
+      TZ: ${TZ:-Asia/Shanghai}
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-6666}:3000"
+
+volumes:
+  paddle_cache:

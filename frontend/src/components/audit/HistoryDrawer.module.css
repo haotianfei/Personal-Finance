@@ -1,0 +1,27 @@
+/* 右侧抽屉入场：轻微右移 + 淡入。
+ *
+ * 不复用 tailwind 的 `animate-slide-up`（那是居中弹层的上浮），也不新增全局 keyframe：
+ * 动效只服务这一个组件，放 CSS Module 里不污染 tokens。
+ * 关闭不做退场动画：抽屉关掉时焦点已经回到表格行，延时会让人以为没响应。
+ */
+.panel {
+  animation: historyDrawerIn var(--pf-motion-sheet) var(--pf-motion-easing);
+}
+
+@keyframes historyDrawerIn {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* 系统要求减少动态：直接出现（不闪、不位移） */
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    animation: none;
+  }
+}

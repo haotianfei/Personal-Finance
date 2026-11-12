@@ -1,0 +1,19 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+sqlalchemy==2.0.35
+pydantic==2.9.2
+python-multipart==0.0.12
+aiofiles==24.1.0
+croniter>=1.3.0
+apscheduler>=3.10.0
+structlog>=24.1
+httpx==0.28.1
+numpy==2.3.5
+opencv-contrib-python==4.10.0.84
+paddleocr==3.7.0
+paddlex==3.7.2
+paddlepaddle==3.3.1
+# 原图体检表（image_meta：width/height/bytes/format + EXIF 白名单子集，ADR-0022 D6）。
+# 此前只是传递依赖（容器 13.0.0 / 本机 12.3.0）；代码只用 Image.open/getexif 这类
+# 长期稳定 API，不依赖 13 独有能力。
+pillow==13.0.0
